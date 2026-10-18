@@ -4,7 +4,10 @@ generated: 2026-10-17
 repo_root: . (nopSolutions/nopCommerce, branch claude/10x-repo-map-since-2022-c01315, same tip as develop)
 history_window: 2022-01-01..HEAD @ 5b31db5b27 (effective 2021-12-29..2026-10-16; 1970 non-merge commits, 1955 counted, 1937 without sweeping refactors)
 evidence_sources: git + gh (nopSolutions/nopCommerce, read-only; all 599 PRs and 1697 issues created in the window)
-graph_coverage: C# project references (csproj): level 2, high confidence; C# `using Nop.*` namespace graph: level 4 fallback, low-medium confidence; Razor (986 .cshtml) and JS: no graph
+graph_coverage:
+  C# project references (csproj): level 2, high confidence; C# `using Nop.*`
+  namespace graph: level 4 fallback, low-medium confidence;
+  Razor (986 .cshtml) and JS: no graph
 evidence: context/map/evidence/
 ---
 
