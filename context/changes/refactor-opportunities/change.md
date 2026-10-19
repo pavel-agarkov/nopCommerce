@@ -1,7 +1,7 @@
 ---
 change_id: refactor-opportunities
 title: Rank checkout-flow refactor opportunities, target architecture and order
-status: plan_reviewed
+status: implementing
 created: 2026-10-18
 updated: 2026-10-19
 archived_at: null
