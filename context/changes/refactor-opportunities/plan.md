@@ -512,14 +512,14 @@ None. There is no schema, setting, resource, route or view change. Third-party C
 
 #### Automated
 
-- [x] 1.1 Solution builds: `dotnet build --configuration Release src`
-- [x] 1.2 Harness smoke tests pass
-- [x] 1.3 Existing tests still pass: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests`
-- [x] 1.4 Full CI-equivalent run passes: `dotnet test --no-build --configuration Release src`
+- [x] 1.1 Solution builds: `dotnet build --configuration Release src` — 5c9e783559
+- [x] 1.2 Harness smoke tests pass — 5c9e783559
+- [x] 1.3 Existing tests still pass: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests` — 5c9e783559
+- [x] 1.4 Full CI-equivalent run passes: `dotnet test --no-build --configuration Release src` — 5c9e783559
 
 #### Manual
 
-- [x] 1.5 Smoke tests give the same results run twice and in reverse order
+- [x] 1.5 Smoke tests give the same results run twice and in reverse order — 5c9e783559
 
 ### Phase 2: Characterization tests
 
