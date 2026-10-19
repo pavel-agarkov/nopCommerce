@@ -5,10 +5,12 @@ git_commit: 210b5dcf29206cd9ecc4346345dcabf2b9da1794
 branch: claude/checkout-refactor-opportunities-2d2245
 repository: nopSolutions/nopCommerce (fork pavel-agarkov/nopCommerce)
 topic: "Checkout refactor opportunities: which documented issues are worth fixing, target shape, order"
-tags: [research, refactoring, checkout, orders, OrderProcessingService, CheckoutController, technical-debt]
+tags: [research, refactoring, checkout, orders, OrderProcessingService, CheckoutController, technical-debt, verified]
 status: complete
-last_updated: 2026-10-18
+last_updated: 2026-10-19
 last_updated_by: Claude (Opus 5.5)
+last_updated_note: "Structural claims verified with ast-grep 0.51.0; counts and line numbers corrected in place as `new (report: old)`; see Claim Verification (ast-grep)"
+verified_commit: 90ffdb42f9694c8c2d48544e8e16ddbc28864398
 ---
 
 # Research: Checkout refactor opportunities
@@ -40,7 +42,7 @@ The parent re-checked these claims at HEAD:
 - OPS:1686-1691, the mutex comment.
 - CC:136, which still says "X seconds".
 - OnePageCheckout.cshtml:206 and public.onepagecheckout.js:808-810: OPC success goes to `CHECKOUT_COMPLETED` without an order id.
-- BaseDataProvider.cs:503-533: Serializable isolation with `TransactionScopeAsyncFlowOption.Enabled`.
+- BaseDataProvider.cs:503-534 (report: 503-533): Serializable isolation with `TransactionScopeAsyncFlowOption.Enabled`.
 - `PlaceOrderWithLock = false` and `OnePageCheckoutEnabled = true` in InstallRequiredData.cs:1893 and :1870.
 - PayPalCommerceServiceManager.cs:2170-2172: when the result is not `Success`, it throws `NopException`.
 - `git show` of faf8ec0002, 42ae7dfdec, 17dfa667d0 (the removed commented-out `TransactionScope` at old lines 960/1688), a0ca5250e9 and 48e78a7b08.
@@ -62,7 +64,7 @@ Every issue CFA identifies, whatever it was labelled, is listed here. **CANDIDAT
 | I9 | OPC vs multi-step near-copies (§4.2) | debt [E] | CANDIDATE | C6 |
 | I10 | Guard block repeated in 20 actions (§1.1, A6) | debt [E] | CANDIDATE | C6 |
 | I11 | Repeated validation: cart warnings at 7 sites, `IsPaymentWorkflowRequiredAsync` at 10, guest check at 21 + 1 (§4.2, A4/A5) | debt [E] | CANDIDATE | C7 |
-| I12 | Untyped OPC JS ↔ controller contract, 6 hard-coded URLs, no named routes (§1.3, §4.3, A15) | debt [E] | CANDIDATE | C8 |
+| I12 | Untyped OPC JS ↔ controller contract, 9 (report: 6) hard-coded URLs, no named routes (§1.3, §4.3, A15) | debt [E] | CANDIDATE | C8 |
 | I13 | `ProcessPaymentRequest` stored as a JSON blob in GA (§4.3) | debt [E] | CANDIDATE | C9 |
 | I14 | Checkout state spread over 12 GA keys / 51 writes (§1.7, A17) | insight [E] | CANDIDATE | C9 |
 | I15 | `IPaymentMethod`: 21 members, no default implementation, no payment base class (§4.3, A20) | debt [E] | CANDIDATE | C10 |
@@ -112,11 +114,11 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
 - **[E]** `PlaceOrderAsync` (OPS:1594) runs these steps in order:
   1. payment, `GetProcessPaymentResultAsync` (OPS:1610);
   2. order save (:1616), cart → items (:1621), discount/gift-card history (:1624/:1627), recurring (:1631);
-  3. notifications (:1634) — which insert `QueuedEmail` and notes and can write a PDF to disk (OPS:824-860);
+  3. notifications (:1634) — which insert `QueuedEmail` and notes and can write a PDF to disk (OPS:824-859 (report: 824-860));
   4. GA reset (:1637-1639), activity log (:1641), `OrderPlacedEvent` (:1646), status/paid handling (:1649-1652).
   
   All of it sits in one `try` that converts exceptions to strings (:1663-1667), with no transaction.
-- **[E]** An async-capable transaction abstraction already exists: `INopDataProvider.CreateTransactionScope()` (INopDataProvider.cs:331; BaseDataProvider.cs:503-533). It is `Required`, Serializable, `TransactionScopeAsyncFlowOption.Enabled`, and is used today only by bulk operations (EntityRepository.cs:364/470/504; SyncCodeHelper.cs:103/119). There is no unit of work (grep `UnitOfWork` in `Libraries/`: 0).
+- **[E]** An async-capable transaction abstraction already exists: `INopDataProvider.CreateTransactionScope()` (INopDataProvider.cs:331; BaseDataProvider.cs:503-534 (report: 503-533)). It is `Required`, Serializable, `TransactionScopeAsyncFlowOption.Enabled`, and is used today only by bulk operations (EntityRepository.cs:364/470/504; SyncCodeHelper.cs:103/119). There is no unit of work (grep `UnitOfWork` in `Libraries/`: 0).
 - **[E]** `EventPublisher.PublishAsync` runs consumers inline and catches and logs their exceptions (EventPublisher.cs:25-51). At least 5 plugins consume `OrderPlacedEvent` (CFA §1.8).
 - **[I]** A scope around the post-payment writes would contain plugin consumers that do external I/O, and the PDF file write.
 
@@ -149,8 +151,8 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
   - `NopException` (Nop.Core/NopException.cs:6), already thrown in OPS (:1612, :2834, :2945) and in PayPalCommerce;
   - the `BaseNopResult` family (Nop.Services/BaseNopResult.cs:6): `PlaceOrderResult`, `ProcessPaymentResult`, `Capture/Refund/VoidPaymentResult` and others;
   - `BaseController.ErrorJson` (BaseController.cs:121, :134).
-- **[E]** There is no MVC exception filter, only the `UseNopExceptionHandler` middleware (ApplicationBuilderExtensions.cs:72-113).
-- **[E]** CC throws plain `Exception` with localized text to steer control flow (CC:1310-1311; OPC guards CC:1797-1812). Those land in `catch (Exception exc)` blocks that return `exc.Message` (CC:1356-1360, :2108-2112).
+- **[E]** There is no MVC exception filter, only the `UseNopExceptionHandler` middleware (ApplicationBuilderExtensions.cs:72-116 (report: 72-113)).
+- **[E]** CC throws plain `Exception` with localized text to steer control flow (CC:1313-1314 (report: 1310-1311); OPC guards CC:1797-1812). Those land in `catch (Exception exc)` blocks that return `exc.Message` (CC:1355-1359 (report: 1356-1360), :2122-2126 (report: 2108-2112)).
 - **[E]** `PreparePlaceOrderDetailsAsync` runs at OPS:1602, before the local `placeOrder` and its `try`. Validation failures therefore escape as exceptions instead of `PlaceOrderResult.Errors`, and the error logging at OPS:1672-1676 does not run for them.
 
 **Intentionality: split verdict.**
@@ -163,14 +165,14 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
   - PayPalCommerce converts `!Success` into `NopException` (PayPalCommerceServiceManager.cs:2170-2172 [E]) inside its own `HandleFunctionAsync` wrapper (:2102 [E]), so it sees an equivalent failure.
   - The customer-visible error text and logging change.
 - **[I]** Replacing the 17 catch sites with typed handling is a larger, behaviour-visible change (messages shown to customers). The value of doing it is **[U]**: no issue reports a lost stack trace.
-- **[I]** First step: a characterization test of `PlaceOrderAsync` with an invalid cart (for example, an empty cart reaches OPS:502-526), recording today's "throws" behaviour. The existing harness can host it.
+- **[I]** First step: a characterization test of `PlaceOrderAsync` with an invalid cart (for example, an empty cart throws at OPS:498-499 (report: 502-526)), recording today's "throws" behaviour. The existing harness can host it.
 
 ### C3. Duplicate-order lock (I6)
 
 **Current shape**
 - **[E]** OPS:1681-1718 uses a named `Mutex` keyed by customer, a static-cache flag, `.Result` ×3 and `.Wait()` ×1. The comment says a semaphore was rejected because of a UNIX `PlatformNotSupportedException` (OPS:1689-1690).
 - **[E]** `ILocker.PerformActionWithLockAsync` exists (Nop.Core/Caching/ILocker.cs:12). It has `MemoryCacheLocker` and `DistributedCacheLocker` implementations, chosen by config (Nop.Web.Framework/Infrastructure/NopStartup.cs:123/127). It is used by ScheduleTaskRunner.cs:141 and SitemapModelFactory.cs:690 and is covered by LockerTests.
-- **[E]** Its semantics differ: it is try-lock (it returns `false` when the lock is held, where the Mutex waits), and `DistributedCacheLocker` does a non-atomic get-then-set (:33-56).
+- **[E]** Its semantics differ: it is try-lock (it returns `false` when the lock is held, where the Mutex waits), and `DistributedCacheLocker` does a non-atomic get-then-set (:33-55 (report: 33-56)).
 
 **Intentionality: intentional constraint (security-driven opt-in); the sync-over-async is a known, commented trade-off.**
 - **[E]** Introduced in faf8ec0002 (#7325) against a "single packet attack" that redeemed a gift card twice. The issue says the lock is off by default because "in some cases it could lead to deadlocks". The default `PlaceOrderWithLock = false` is at InstallRequiredData.cs:1893.
@@ -214,7 +216,7 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
   - shipment: 2236-2374
   - reorder: 3121-3191
   - min-total / payment-workflow checks: 3192-3260
-  - payment-request GA storage: 3321-3372
+  - payment-request GA storage: 3321-3369 (report: 3321-3372)
 - **[E]** All the large classes are `partial` with `virtual` members; CC derives from `BasePublicController` (CC:33).
 
 **Intentionality: accidental growth on top of an intentional extensibility convention.**
@@ -240,7 +242,7 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
 - **[E]** The guard sequence is inlined (e.g. CC:971-985, 1281-1294, 1797-1809), 20 times in total (A6).
 - **[E]** Precedents already in CC and the framework:
   - `protected virtual EditAddressAsync(..., Func<…, Task<JsonResult>> getResult)` (CC:268) and `DeleteAddressAsync` (CC:311) take a result callback and are reused by 4 actions (CC:488, 519, 545, 572), some with a `bool opc` flag (CC:486).
-  - The filter pattern: `sealed XAttribute : TypeFilterAttribute` with an inner `IAsyncAuthorizationFilter` and an `ignore` flag (CheckAccessPublicStoreAttribute.cs:11-102). There are 26 such filters in Nop.Web.Framework/Mvc/Filters, and 6 are applied by `BasePublicController` (BasePublicController.cs:7-12).
+  - The filter pattern: `sealed XAttribute : TypeFilterAttribute` with an inner `IAsyncAuthorizationFilter` and an `ignore` flag (CheckAccessPublicStoreAttribute.cs:11-111 (report: 11-102)). There are 26 such filters in Nop.Web.Framework/Mvc/Filters, and 6 are applied by `BasePublicController` (BasePublicController.cs:7-12).
 
 **Intentionality: the two flows are intentional (since 2011); the copy-paste between them is accidental.**
 - **[E]** OPC existed in the 2010 WebForms code (2694be8d7a). The MVC version is 6b6b4b3a3b (2011-09-28).
@@ -268,8 +270,8 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
 ### C8. Untyped OPC JS ↔ controller contract (I12)
 
 **Current shape**
-- **[E]** One typed piece exists: `UpdateSectionJsonModel` (Nop.Web/Models/Checkout/UpdateSectionJsonModel.cs:3, used 17×). Everything else is anonymous `Json(new …)`: 32 in CC, 54 in ShoppingCartController.
-- **[E]** OnePageCheckout.cshtml builds `'@(storeLocation)checkout/...'` literal URLs (:65, 66, 74, 96, 110, 133, 162, 185, 206) and CC builds one too (CC:2096). Elsewhere in Nop.Web views, `Url.RouteUrl` appears 157 times.
+- **[E]** One typed piece exists: `UpdateSectionJsonModel` (Nop.Web/Models/Checkout/UpdateSectionJsonModel.cs:3, used 16× (report: 17×), all in CC). Everything else is anonymous `Json(new …)`: 32 in CC, 53 (report: 54) in ShoppingCartController.
+- **[E]** OnePageCheckout.cshtml builds `'@(storeLocation)checkout/...'` literal URLs (:65, 66, 74, 96, 110, 133, 162, 185, 206) and CC builds one too (CC:2096). Elsewhere in Nop.Web views, `Url.RouteUrl` appears 158 (report: 157) times (on 157 lines).
 
 **Intentionality: unknown origin; the contract is load-bearing for third-party themes.**
 - **[E]** 48e78a7b08 reverted #7709 under #7744, "4.80.7 change to OnePageCheckout.cshtml breaks OPC", reported by a Pacific theme user with overridden views/JS. A maintainer deferred the change to 4.90 rather than a 4.80.x patch.
@@ -280,8 +282,8 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
 ### C9. Checkout state in GenericAttribute (I13, I14)
 
 **Current shape**
-- **[E]** Keys are static properties in `NopCustomerDefaults` (lines 51-151).
-- **[E]** `ResetCheckoutDataAsync` (IShoppingCartService.cs:339; SCS:1935-~1970) clears the step keys but not `ProcessPaymentRequestAttribute`, which is cleared separately (CC:1335).
+- **[E]** Keys are static properties in `NopCustomerDefaults` (lines 51-186 (report: 51-151)).
+- **[E]** `ResetCheckoutDataAsync` (IShoppingCartService.cs:339; SCS:1935-1971 (report: 1935-~1970)) clears the step keys but not `ProcessPaymentRequestAttribute`, which is cleared separately (CC:1335).
 - **[E]** No `CheckoutState`/`CheckoutContext` type exists. `ProcessPaymentRequest` is the only aggregate-like DTO, encapsulated behind `IOrderProcessingService.Get/SetProcessPaymentRequestAsync` (IOrderProcessingService.cs:349, :357).
 
 **Intentionality: intentional constraint, recent.**
@@ -289,13 +291,13 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
 - **[E]** Reusing the order GUID across attempts is deliberate brute-force protection (85d55663df, #3622, 2019).
 
 **Feasibility**
-- **[I]** The storage can be swapped behind the existing interface (OPS only). A new state model needs a table, an `UpgradeTo*/SchemaMigration` and an in-flight data migration. Changing the shape of `ProcessPaymentRequest` reaches 17 files (CFA §3.1).
+- **[I]** The storage can be swapped behind the existing interface (OPS only). A new state model needs a table, an `UpgradeTo*/SchemaMigration` and an in-flight data migration. Changing the shape of `ProcessPaymentRequest` reaches 12 (report: 17) files (CFA §3.1).
 
 ### C10. `IPaymentMethod` shape (I15)
 
 **Current shape**
 - **[E]** `public partial interface IPaymentMethod : IPlugin` (IPaymentMethod.cs:10). The shipping, tax and widget plugin interfaces have the same shape.
-- **[E]** `BasePlugin` (BasePlugin.cs:6-63) is the only plugin base class.
+- **[E]** `BasePlugin` (BasePlugin.cs:6-70 (report: 6-63)) is the only plugin base class.
 - **[E]** A default-interface-member precedent exists in `IConfig` (Nop.Core/Configuration/IConfig.cs:14, :20). The target framework is `net10.0` with no `LangVersion` (Directory.Build.props:3), so default interface members are available.
 
 **Intentionality: intentional growth.**
@@ -310,7 +312,7 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
 ### C11. PayPalCommerce coupling (I16)
 
 **Current shape**
-- **[E]** Its `PlaceOrderAsync` (PayPalCommerceServiceManager.cs:2100-2181) mirrors CC `ConfirmOrder`: empty-cart check (2108-2111), GA payment request (2113), interval check (2152-2157), setting StoreId/CustomerId/system name (2163-2165), `PlaceOrderAsync` (2170) and clearing the request (2178). It adds PayPal-specific order status, liability and total checks (2122-2149).
+- **[E]** Its `PlaceOrderAsync` (PayPalCommerceServiceManager.cs:2100-2181) mirrors CC `ConfirmOrder`: empty-cart check (2108-2111), GA payment request (2113), interval check (2152-2157), setting StoreId/CustomerId/system name (2164-2166 (report: 2163-2165)), `PlaceOrderAsync` (2170) and clearing the request (2178). It adds PayPal-specific order status, liability and total checks (2122-2149).
 - **[E]** It uses `ICheckoutModelFactory` (PayPalCommerceModelFactory.cs:111, 247).
 - **[I]** It never calls `PostProcessPaymentAsync`.
 
@@ -329,8 +331,8 @@ That gives 18 issues grouped into 13 candidates (C1–C13) and 11 non-candidates
 ### C13. Two `IShoppingCartModelFactory` interfaces (I18)
 
 - **[E] Shape.** `Nop.Web.Factories.IShoppingCartModelFactory` and `Nop.Web.Areas.Admin.Factories.IShoppingCartModelFactory`. No file imports both. Namespace qualification resolves the collision (Nop.Web/Infrastructure/NopStartup.cs:77 vs :108; BaseNopTest.cs:535 vs :562).
-- **[E] Intentionality: intentional mirrored convention.** 14 interface names collide between `Areas/Admin/Factories` and `Factories`, a result of #1897 ("Use model factories in Nop.Admin projects (similar to Nop.Web)", 2018).
-- **[I] Feasibility.** A rename would be a public break for 17 referencing files, with no defect evidence.
+- **[E] Intentionality: intentional mirrored convention.** 13 (report: 14) interface names collide between `Areas/Admin/Factories` and `Factories`, a result of #1897 ("Use model factories in Nop.Admin projects (similar to Nop.Web)", 2018).
+- **[I] Feasibility.** A rename would be a public break for 15 (report: 17) referencing files (17 including the two interface definitions), with no defect evidence.
 
 ## Refactor opportunities
 
@@ -413,16 +415,16 @@ Ranking criterion: debt cost (money-path risk, observed incidents and friction, 
 
 - `Libraries/Nop.Services/Orders/OrderProcessingService.cs`:
   - `:1594-1721` PlaceOrderAsync; `:1601-1602` preparation outside the try; `:1610` payment; `:1616-1652` post-payment steps; `:1663-1676` catch and logging
-  - `:1681-1718` lock; `:3241-3254` IsPaymentWorkflowRequiredAsync; `:3321-3372` payment request in GA
-- `Libraries/Nop.Data/DataProviders/BaseDataProvider.cs:503-533` — CreateTransactionScope (Serializable, async flow); `INopDataProvider.cs:331`
-- `Libraries/Nop.Core/Caching/ILocker.cs:12`; `DistributedCacheLocker.cs:33-56`
+  - `:1681-1718` lock; `:3241-3254` IsPaymentWorkflowRequiredAsync; `:3321-3369` (report: 3321-3372) payment request in GA
+- `Libraries/Nop.Data/DataProviders/BaseDataProvider.cs:503-534 (report: 503-533)` — CreateTransactionScope (Serializable, async flow); `INopDataProvider.cs:331`
+- `Libraries/Nop.Core/Caching/ILocker.cs:12`; `DistributedCacheLocker.cs:33-55 (report: 33-56)`
 - `Libraries/Nop.Services/BaseNopResult.cs:6`; `Orders/PlaceOrderResult.cs:8`; `Nop.Core/NopException.cs:6`
 - `Presentation/Nop.Web/Controllers/CheckoutController.cs`:
   - `:136` stale comment; `:142`, `:430`, `:2143`, `:2156` latest-order lookups; `:2072`, `:2096` OPC redirection
   - `:268`, `:311` callback helpers; `:968-1050` vs `:1792-1877` duplicated pair
 - `Presentation/Nop.Web/Views/Checkout/OnePageCheckout.cshtml:206`; `wwwroot/js/public.onepagecheckout.js:808-810`
 - `Presentation/Nop.Web/Infrastructure/RouteProvider.cs:321` — `{orderId:int?}`
-- `Presentation/Nop.Web.Framework/Mvc/Filters/CheckAccessPublicStoreAttribute.cs:11-102` — filter pattern
+- `Presentation/Nop.Web.Framework/Mvc/Filters/CheckAccessPublicStoreAttribute.cs:11-111 (report: 11-102)` — filter pattern
 - `Plugins/Nop.Plugin.Payments.PayPalCommerce/Services/PayPalCommerceServiceManager.cs:2100-2181`
 - `Libraries/Nop.Services/Installation/InstallRequiredData.cs:1870`, `:1893`
 - `Tests/Nop.Tests/Nop.Services.Tests/Payments/TestPaymentMethod.cs:103-111`, `:221-231`; `Tests/Nop.Tests/Nop.Web.Tests/Public/Factories/CheckoutModelFactoryTests.cs:43-80`
@@ -455,3 +457,70 @@ Ranking criterion: debt cost (money-path risk, observed incidents and friction, 
 - **[U]** Rationale for `[IgnoreAntiforgeryToken]` on `OpcSavePaymentInfo` (N3). Not traced; it belongs to a security review.
 - **[U]** Release tags are absent locally, so the growth trend in C5 is sampled by date and counts injected `I*` fields, not constructor parameters.
 - Search coverage: `gh search` recall is limited, so every "no issue found" statement is **[U]**, not proof of absence.
+
+## Claim Verification (ast-grep)
+
+**Tool and scope.** ast-grep 0.51.0 (`-l csharp`; YAML rules via `ast-grep scan -r`), run from `src/` at commit 90ffdb42f9 (`src/` is unchanged since 210b5dcf29, the commit this report was written against). Every structural claim the ranking rests on was checked: method and member counts, constructor sizes, call-site counts, "overrides/subclasses X" absences, mirrored type pairs and the line anchors used as evidence. Every ast-grep zero was re-checked with `grep -rn`/`grep -rlw`. Razor views (`.cshtml`) have no ast-grep grammar, so view claims rest on grep only. Where a count or line was wrong, the text above was corrected in place as `new (report: old)`, except inside **Refactor opportunities**, which is left as written. Verdicts:
+- **confirmed**: the claim holds as stated.
+- **refined**: the claim holds, but its number, scope or anchor was imprecise.
+- **disproven**: the claim does not hold.
+
+| # | Claim (report wording, abbreviated) | Verdict | Evidence (file:line) | Method (pattern / rule) |
+|---|---|---|---|---|
+| V1 | OPS has 70 and CC has 40 `public/protected virtual` members | confirmed | OPS: 34 public async + 6 public sync + 30 protected async methods. CC: 29 public + 11 protected. Grep finds 70 and 40. | YAML: `method_declaration` / `property_declaration` that `has` a `modifier` matching `^virtual$` |
+| V2 | CC has 29 public actions and 11 `protected virtual` helpers | confirmed | Helpers at CC:134, 157, 176, 197, 227, 252, 268, 311, 1369, 1398, 1462 | V1 rule, split by access modifier |
+| V3 | Constructor parameters: OPS 50, CC 28, ShoppingCartModelFactory 50, SCS 31, CheckoutModelFactory 31, OTCS 22 | confirmed | Constructors at OPS:99-200, CC:71-128, SCS:72-135 | YAML: `kind: parameter` inside `parameter_list` inside `constructor_declaration` |
+| V4 | OPS has 50 `protected readonly` fields, 42 of them injected `I*` | confirmed | Fields at OPS:40-98; grep finds 50 and 42 | YAML: `field_declaration` that `has` the modifiers `protected` and `readonly` |
+| V5 | Exceptions are flattened to strings at 10 CC + 7 OPS sites | confirmed | CC:304, 331, 1355, 1665, 1784, 1872, 1944, 2010, 2122, 2178. OPS:1663, 2068, 2124, 2535, 2689, 2876, 3039. | YAML: `catch_clause` that `has` (stopBy: end) `$E.Message` |
+| V6 | CC throws `Exception` at CC:1310-1311, and its catches are at :1356-1360 and :2108-2112 | refined | Throw at CC:1313-1314; catches at CC:1355-1359 and CC:2122-2126. 1310 is the `try`; 2108-2112 is the captcha `else` branch. CC has 37 `throw new Exception` sites in total. | `throw new Exception($$$)`; `try { $$$ } catch ($T $E) { $$$ }` |
+| V7 | `PreparePlaceOrderDetailsAsync` runs at OPS:1602, before the local `placeOrder` and its `try` | confirmed | Call at OPS:1602. The only try/catch in `PlaceOrderAsync` spans OPS:1608-1667, inside the local function at :1604. **New:** the preparation path (OPS:288-586) holds 15 `new NopException` sites (329, 370, 401, 453, 458, 464, 499, 504, 515, 522, 529, 543, 548, 553, 573), and all of them escape as exceptions. | `PreparePlaceOrderDetailsAsync($$$)`; try/catch pattern; `new NopException($$$)` filtered by range |
+| V8 | `NopException` is already thrown in OPS (:1612, :2834, :2945) | refined | The three examples hold. OPS has 45 `new NopException` sites (grep: 45). | `new NopException($$$)` (a `throw new NopException($$$)` pattern finds only 35 because it misses `?? throw` expressions) |
+| V9 | Empty-cart characterization reaches OPS:502-526 | refined | An empty cart throws at OPS:498-499 (`"Cart is empty"`). OPS:502-531 hold the warning and min-total checks. | method-range scan (`PrepareAndValidateShoppingCartAndCheckoutAttributesAsync` 489-532), then read |
+| V10 | Mutex branch: OPS:1681-1718, `.Result` ×3, `.Wait()` ×1 | confirmed | `.Result` at OPS:1700, 1705, 1709; `.Wait()` at 1712; `new Mutex` at 1691 | `$X.Result`; `$X.Wait()`; `new Mutex($$$)` |
+| V11 | The named-`Mutex` idiom also appears in PictureService ×3, UploadedImagesMigration and BaseNopTest (N9) | confirmed | PictureService.cs:463, 567, 597; UploadedImagesMigration.cs:174; BaseNopTest.cs:746, 773 | `new Mutex($$$)` repo-wide (7) |
+| V12 | `CreateTransactionScope()` is used only by bulk ops (EntityRepository:364/470/504; SyncCodeHelper:103/119) | confirmed | Exactly those 5 sites. Definition: BaseDataProvider.cs:503-534 (report: 503-533). | `$R.CreateTransactionScope($$$)` |
+| V13 | No unit of work in `Libraries/` | confirmed | 0 | YAML `kind: identifier, regex: ^UnitOfWork$` → 0; grep `-rlw UnitOfWork Libraries` → 0 |
+| V14 | `ILocker` is used by ScheduleTaskRunner.cs:141 and SitemapModelFactory.cs:690, registered at NopStartup.cs:123/127 | confirmed | Plus 4 calls in LockerTests.cs:64-81. Lock body: DistributedCacheLocker.cs:33-55 (report: 33-56). | `$L.PerformActionWithLockAsync($$$)` |
+| V15 | Guard block repeated in 20 actions | confirmed | `CheckoutDisabled` ×22, `!cart.Any()` ×22, guest check ×21; 20 public methods have both guards | `if (_orderSettings.CheckoutDisabled) $B`; `if (!cart.Any()) $B`; YAML: public `method_declaration` that `has` both |
+| V16 | Cart warnings run at 7 sites | confirmed | OPS:502, 1742; CC:385; ShoppingCartController.cs:1389; ShoppingCartModelFactory.cs:983, 1093; PayPalCommerceServiceManager.cs:1431. The receiver pattern also matches PayPalCommercePublicController.cs:55, but that is the plugin's own `_modelFactory.GetShoppingCartWarningsAsync()` wrapper (PayPalCommerceModelFactory.cs:121), not `IShoppingCartService`. | `$S.GetShoppingCartWarningsAsync($$$)` → 8, then filtered by receiver; grep agrees |
+| V17 | `IsPaymentWorkflowRequiredAsync` is called at 10 sites | confirmed | CC ×8 (1073, 1135, 1176, 1225, 1321, 1404, 1914, 2061), CheckoutModelFactory.cs:523, OPS:1400 | `$S.IsPaymentWorkflowRequiredAsync($$$)` (9) + receiver-less `IsPaymentWorkflowRequiredAsync($$$)` (1) |
+| V18 | The guest check runs at 21 + 1 sites | confirmed | 21 actions in CC plus OPS:572 on the placement path. OPS:621 has the same check in `PrepareRecurringOrderDetailsAsync`, which is a recurring path, not placement. | guest-check `if` pattern; grep |
+| V19 | 3 latest-order lookups (CC:142/430/2143) | confirmed | CC:142, 430, 2143; the 3-minute window is at CC:2156 | `$S.SearchOrdersAsync($$$, pageSize: 1)` |
+| V20 | `Completed` gets the id from multi-step but not from OPC; `PlacedOrder` is available at CC:2072; the redirection URL is a literal at CC:2096 | confirmed | `RedirectToRoute(…, new { orderId = … })` appears only at CC:439, 1349, 2176. `PlaceOrderAsync` is called at CC:2072. The literal URL is at CC:2096. The OPC success URL `Url.RouteUrl(CHECKOUT_COMPLETED)` has no id (OnePageCheckout.cshtml:206). The JS uses `successUrl` (public.onepagecheckout.js:808-810). The route is `{orderId:int?}` (RouteProvider.cs:321). | `RedirectToRoute($R, new { orderId = $$$ })`; `$S.PlaceOrderAsync($$$)`; grep for cshtml/js |
+| V21 | `PlaceOrderAsync` has 3 production entry points (CC ×2, PayPalCommerce) | confirmed | CC:1332, CC:2072, PayPalCommerceServiceManager.cs:2170 (+ plugin wrapper PayPalCommerceModelFactory.cs:282) | `$S.PlaceOrderAsync($$$)` |
+| V22 | PayPalCommerce calls 12 OPS methods and never calls `PostProcessPaymentAsync` | confirmed | 12 methods / 25 calls; `$S.PostProcessPaymentAsync($$$)` → 0 (grep: only its own `IPaymentMethod` declarations, PayPalCommercePaymentMethod.cs:81, 226). Its `PlaceOrderAsync` spans PayPalCommerceServiceManager.cs:2099-2182. StoreId/CustomerId/system name are set at 2164-2166 (report: 2163-2165). | `_orderProcessingService.$M($$$)` grouped by `$M`; method-range scan |
+| V23 | No in-repo class subclasses OPS, CC, SCS or the factories | confirmed | 0 for OPS, CC, SCS, ShoppingCartModelFactory, CheckoutModelFactory and OTCS | YAML: `class_declaration` whose `base_list` has identifier `^<Class>$` → 0; grep `:\s*<Class>\b` → 0 |
+| V24 | `IShoppingCartService` is referenced from 49 files in 10 plugins | confirmed | 50 files including the definition, so 49 referencing files. 16 plugin files in 10 plugins (Brevo, Omnisend, PunchOut, RFQ, CheckMoneyOrder, PayPalCommerce, FixedByWeightByTotal, Avalara, FacebookPixel, GoogleAnalytics). | YAML `kind: identifier, regex: ^IShoppingCartService$`, distinct files; grep `-rlw` 50 |
+| V25 | Two mirrored `IShoppingCartModelFactory` interfaces (C13): "14 interface names collide", "17 referencing files" | **disproven** (14) / refined (17) | 13 colliding interface names between `Areas/Admin/Factories` and `Factories`: Address, Blog, Common, Country, Customer, FilterLevelValue, Menu, Order, Product, ReturnRequest, ShoppingCart, Topic, Vendor (`I…ModelFactory`). The same 13 collide across all of Nop.Web. 17 files reference `IShoppingCartModelFactory`, but that count includes both definitions, so 15 others. Qualification sites NopStartup.cs:77/108 and BaseNopTest.cs:535/562 are confirmed. | YAML: `identifier` that is the `name` of an `interface_declaration`, per folder, then `comm -12`; grep agrees (13). Identifier rule for references; grep `-rlw` 17 |
+| V26 | `ProcessPaymentRequest` shape change reaches 17 files | refined | 12 files with code references, including its own definition. The other 5 grep hits are doc comments and a GA key string (NopCustomerDefaults.cs:119/121, Order.cs:237, AddIndexesMigration.cs:330, AddressItem.cs:104, SampleOrder.cs:170). | YAML `kind: identifier, regex: ^ProcessPaymentRequest$` → 12 files; grep `-rlw` → 17 |
+| V27 | Checkout state: 12 GA keys / 51 writes across CC + OPS + SCS | confirmed (count), refined (scope) | There are 51 writes over 12 keys. One key, `NopPaymentDefaults.NextRecurringPaymentNotificationEmailsAttribute` (3 writes on `RecurringPayment`, OPS:1274, 2035, 2120), is not checkout state, so checkout state proper is 11 `NopCustomerDefaults` keys / 48 writes. Keys are declared at NopCustomerDefaults.cs:51-186 (report: 51-151). | YAML `any:` of `_genericAttributeService.SaveAttributeAsync($$$)` and `…SaveAttributeAsync<$T>($$$)`, grouped by key; grep 32 + 7 + 12 = 51 |
+| V28 | No `CheckoutState`/`CheckoutContext` type; no MVC exception filter; no `TempData` in CC | confirmed | 0 / 0 / 0. `UseNopExceptionHandler` spans ApplicationBuilderExtensions.cs:72-116 (report: 72-113). | `class CheckoutState { $$$ }`; YAML: class whose `base_list` has `IExceptionFilter`/`IAsyncExceptionFilter`/`ExceptionFilterAttribute`; identifier rule `^TempData$`. Grep 0 for each |
+| V29 | `OrderPlacedEvent` has at least 5 plugin consumers; `ClearShoppingCartEvent`/`ResetCheckoutDataEvent` have 0 | refined / confirmed | Exactly 5 consumers, all plugins: GoogleAnalytics, Omnisend, FacebookPixel, Avalara, Brevo. **No core class implements `IConsumer<OrderPlacedEvent>`.** Clear/Reset have 0 consumers (grep 0). | YAML: `generic_name` `IConsumer<…>` inside `base_list` with the event identifier |
+| V30 | `UpdateSectionJsonModel` used 17×; anonymous `Json(new …)`: 32 in CC, 54 in ShoppingCartController | refined | 16 `new UpdateSectionJsonModel` (report: 17), all in CC. Grep's 17 includes the type declaration. CC: 32 confirmed. ShoppingCartController: 53 (report: 54); the 54th is commented out at ShoppingCartController.cs:836. | `new UpdateSectionJsonModel { $$$ }`; `Json(new { $$$ })`; diff against grep line numbers |
+| V31 | 6 hard-coded OPC URLs; `Url.RouteUrl` used 157 times in Nop.Web views | refined (grep only, no cshtml grammar) | 9 literal `'@(storeLocation)checkout/…'` URLs in OnePageCheckout.cshtml (:65, 66, 74, 96, 110, 133, 162, 185, 206). 6 of them are `Opc*` step endpoints; the other 3 are GetAddressById and SaveEdit{Billing,Shipping}Address. One more literal is at CC:2096. `Url.RouteUrl`: 158 occurrences on 157 lines. | `grep -n "storeLocation)checkout/"`; `grep -rho 'Url\.RouteUrl'` vs `grep -rc` |
+| V32 | Filter precedent: 26 filters, 6 applied by `BasePublicController`, `CheckAccessPublicStoreAttribute.cs:11-102` | refined (anchor) | 26 `TypeFilterAttribute` subclasses (grep 26). 6 attributes at BasePublicController.cs:7-12. The class spans CheckAccessPublicStoreAttribute.cs:11-111 (report: 11-102). | YAML: `class_declaration` whose `base_list` has `^TypeFilterAttribute$`; method-range scan |
+| V33 | `EditAddressAsync`/`DeleteAddressAsync` (CC:268/:311) are reused by 4 actions (CC:488, 519, 545, 572), some with `bool opc` (CC:486) | confirmed | `EditAddressAsync` at CC:488, 572; `DeleteAddressAsync` at CC:519, 545; `bool opc = false` at CC:486 | `EditAddressAsync($$$)`; `DeleteAddressAsync($$$)` |
+| V34 | 4 OPC/multi-step action pairs are near-copies that differ only in exit style (CC:968-1050 vs 1792-1877, …) | refined | Ranges confirmed (declarations at CC:968 and 1792). Comparing ordered call sequences with exit calls removed (`RedirectToRoute`, `Json`, `View`, `Challenge`, `OpcLoadStep*`, `GetResourceAsync` …): ShippingMethod 0.85 (22/26 shared), PaymentInfo 0.87, ConfirmOrder 0.83, **PaymentMethod 0.64** (8/13). Three pairs are near-copies; the payment-method pair diverges more. | YAML: `invocation_expression` inside each `method_declaration`, compared with `difflib.SequenceMatcher` |
+| V35 | `IPaymentMethod`: 21 members, `: IPlugin` at :10; shipping/tax/widget interfaces have the same shape; `BasePlugin` is the only plugin base class | confirmed (anchor refined) | 21 members. `IShippingRateComputationMethod : IPlugin` (:9), `ITaxProvider : IPlugin` (:8), `IWidgetPlugin : IPlugin` (:8). The only class implementing `IPlugin` is BasePlugin.cs:6-70 (report: 6-63). | YAML: method/property declarations inside `interface_declaration`; class whose `base_list` has `^IPlugin$` |
+| V36 | Default-interface-member precedent at IConfig.cs:14/:20; `net10.0` at Directory.Build.props:3 | confirmed | IConfig.cs:14 (`Name =>`), :20 (`GetOrder() =>`) | grep / read |
+| V37 | Other anchors: OPS:1594, 1610-1612, 1616-1652, 1663-1676, 1686-1691, 3241-3254; OPS:824-860; OPS:3321-3372; SCS:779, 1935-~1970; IShoppingCartService.cs:339; IOrderProcessingService.cs:349/357; INopDataProvider.cs:331; ILocker.cs:12; NopStartup.cs:96; CustomerService.cs:1277-1278/1370; BaseController.cs:121/134; NopException.cs:6; BaseNopResult.cs:6; PlaceOrderResult.cs:8; InstallRequiredData.cs:1870/1893; TestPaymentMethod.cs:103-111/221-231; OrderProcessingServiceTests.cs:30-33; CheckoutModelFactoryTests.cs:43-80; BaseNopTest.cs:374-381; EventPublisher.cs:25-51; PayPalCommerceModelFactory.cs:111/247 | confirmed, except 3 refined | Corrected: `SendNotificationsAndSaveNotesAsync` spans OPS:824-859 (report: 824-860); `Get/SetProcessPaymentRequestAsync` spans OPS:3321-3369 (report: 3321-3372); `ResetCheckoutDataAsync` spans SCS:1935-1971. All others match. | `method_declaration` range scan (YAML `any:` of method/ctor/class/interface declarations) plus targeted patterns |
+| V38 | Stale "X seconds" comment at CC:136 (N11) | refined | The same stale comment is also at CC:1312 and CC:2052, plus PayPalCommerceServiceManager.cs:2152 | grep (comments are not AST nodes ast-grep matches) |
+
+**Pattern pitfalls hit during this verification** (each would have produced an undercount or a false zero):
+- `throw new NopException($$$)` misses `?? throw new NopException(…)` throw-expressions (35 vs 45). Use `new NopException($$$)`.
+- A bare identifier pattern (`UnitOfWork`, `TempData`) parses to an ERROR node and matches nothing. Use a YAML `kind: identifier` + `regex` rule instead.
+- Receiver patterns (`$S.Method($$$)`) also match same-named wrapper methods on other types (V16). Check the receiver.
+- grep counts include comments, commented-out code and declarations (V26, V30); ast-grep counts don't. When the two disagree, that difference is usually what explains the gap.
+
+### Impact on the ranking
+
+The **Refactor opportunities** section above is unchanged. Its own copies of corrected figures stand as written there, and are corrected here: the C13 row says "14 collisions" and "17 files" (verified: 13 and 15 + 2 definitions), and #2 cites CheckAccessPublicStoreAttribute.cs:11-102 (verified: 11-111). The verification affects candidates as follows:
+
+- **#1 (C2 + transactional C1): no structural claim was undermined.** V5, V7, V12 and V23 confirm the claims it rests on. V7 adds that 15 `NopException` sites in the preparation path escape as exceptions today, which widens the "one failure contract" step. V29 narrows the blast radius: no core class consumes `OrderPlacedEvent`, so the "plus core consumers" in the #1 blast radius applies only to other order events. *To be decided during the planning phase.*
+- **#2 (C6): position not undermined, payoff refined.** V15 and V2 hold. V34 shows that 3 of the 4 pairs are near-copies (call-sequence similarity 0.83-0.87) but the payment-method pair is only 0.64, so a shared step core may fit 3 pairs cleanly and the 4th less so. *To be decided during the planning phase.*
+- **#3 (C4): not undermined.** V19 and V20 confirm every structural claim. V31 shows the OPC view carries 9 hard-coded checkout URLs, not 6. That is relevant only to the literal at CC:2096 that #3 touches, and to theme compatibility. *To be decided during the planning phase.*
+- **Rejected candidates: no rejection reversed, two inputs weakened.**
+  - C9: the `ProcessPaymentRequest` reach is 12 code files, not 17 (V26), and checkout state is 11 keys / 48 writes, not 12 / 51 (V27). Its change cost is a little lower than stated, but the rejection also rests on intentionality (#7379) and a schema/data migration, which are unaffected.
+  - C13: 13 collisions, not 14 (V25). That is immaterial to the rejection.
+
+  *To be decided during the planning phase.*
