@@ -45,7 +45,7 @@
   - Tradeoff: Touches the production data layer and widens scope beyond #2. Needs its own plan and review. Also brings the HTTPS (`store.SslEnabled`) and guest-permission traps into play.
   - Confidence: MED — several boot hurdles stacked; each fixable, none proven.
   - Blind spot: Whether the SQLite schema migrations run cleanly with production startup.
-- **Decision**: PENDING
+- **Decision**: FIXED (Fix A)
 
 ### F2 — The DI harness leaves the rendering branches that Phases 5–6 restructure unpinned
 
@@ -58,8 +58,8 @@
   - Strength: Keeps the oracle meaningful for every branch Phases 5–6 touch.
   - Tradeoff: A test subclass of CC overrides virtual helpers, which is slightly less faithful.
   - Confidence: MED — the rendering helpers are on the base controller; I haven't checked that they're virtual.
-  - Blind spot: Whether `RenderPartialViewToStringAsync` can be overridden.
-- **Decision**: PENDING
+  - Blind spot: Whether `RenderPartialViewToStringAsync` can be overridden. (Resolved in triage: both rendering helpers are `protected virtual`, BaseController.cs:46, :73.)
+- **Decision**: FIXED
 
 ### F3 — The Phase 4 "1 match" check will fail: two partial guards remain
 
@@ -69,7 +69,7 @@
 - **Location**: Phase 4 Automated Verification (4.3); Current State Analysis
 - **Detail**: CC has 22 `if (_orderSettings.CheckoutDisabled)` sites, not 20. `SelectBillingAddress` (CC:647) and `SelectShippingAddress` (CC:804) have a disabled-only guard, and the plan leaves both actions untouched. After Phase 4 there will be 3 matches, not 1.
 - **Fix**: Change 4.3 to "3 matches: `ValidateCheckoutAccessAsync`, `SelectBillingAddress`, `SelectShippingAddress`". Add one line to Current State Analysis noting the two partial guards are deliberately out of scope.
-- **Decision**: PENDING
+- **Decision**: FIXED
 
 ### F4 — The shipping characterization can't reach the pickup branches and misses one throw branch
 
@@ -83,7 +83,7 @@
   - `ParsePickupOptionAsync` throws "Pickup point is not allowed" (CC:187). Multi-step lets it escape as an unhandled exception; OPC catches it and returns JSON. That divergence goes straight through the extracted step method and is not pinned.
   - Multi-step failures fall back to `ShippingMethod()`, which can auto-save through `BypassShippingMethodSelectionIfOnlyOne` (CC:949-958). Pin the GA state for that case too.
 - **Fix**: Add `Pickup.PickupInStore` plus one pickup point and both settings to the harness arrangements. Add the branches "pickup point not allowed" (multi-step throws, OPC returns `{error:1}`) and "invalid option with bypass-if-only-one on".
-- **Decision**: PENDING
+- **Decision**: FIXED (pickup provider is a test-only `IPickupPointProvider` in Nop.Tests, following F1)
 
 ### F5 — The "V1 superset check" compares names, not signatures, and has no runnable command
 
@@ -93,4 +93,4 @@
 - **Location**: Criteria 3.3 / 4.4 / 5.4 / 6.4
 - **Detail**: The research's V1 rule only matches members that carry a `virtual` modifier, and it isn't saved anywhere in the repo. A changed parameter list on an existing member would still pass a superset check by name.
 - **Fix**: Save the rule as a file under the change folder. Diff the full declaration text (name, parameters, return type) of every virtual CC member between `<phase-2-sha>` and HEAD.
-- **Decision**: PENDING
+- **Decision**: FIXED

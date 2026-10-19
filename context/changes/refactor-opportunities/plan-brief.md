@@ -15,7 +15,7 @@ The research ranked three checkout refactor opportunities. This plan implements 
 
 ## Desired End State
 
-- A new `WebApplicationFactory` test project boots Nop.Web on in-memory SQLite. It runs under the existing CI `dotnet test src` step and leaves the source tree untouched.
+- A DI controller harness in Nop.Tests builds CC on in-memory SQLite and calls its actions directly. It runs under the existing CI `dotnet test src` step.
 - Characterization tests pin every guard outcome of the 20 actions and every branch of both pairs, and stay unedited through all later phases.
 - CC has one `protected virtual` guard helper used by all 20 actions, and one shared `protected virtual` step method per extracted pair.
 - All routes, JSON, messages, logs and existing signatures are unchanged.
@@ -28,9 +28,8 @@ The research ranked three checkout refactor opportunities. This plan implements 
 | Behaviour-changing steps | Split into separate changes, not done here | CLAUDE.md: a phase that changes observable behaviour is a separate change | Plan |
 | Transactional part of #1 | Excluded entirely | Not part of #2; LinqToDB enlistment stays an open question for a later change | Plan |
 | Extensibility contract | Additive only: no ctor or existing-signature change | Third-party subclasses are unknown [U]; 40 virtual members and a 28-param ctor are public contract | Plan (Research: V1, V3) |
-| Test harness | `WebApplicationFactory<Program>` on in-memory SQLite, new test project | Covers routing, model binding, filters and real JSON, and runs in today's CI | Plan (user proposal) |
-| Harness gate fallback | DI harness (`ActivatorUtilities` on `BaseNopTest`) if WAF can't boot cleanly | Keeps the refactor moving; known gaps recorded | Plan |
-| Antiforgery in tests | Test-only bypass | Tests target JSON/redirect endpoints; real token flow would need full view rendering | Plan |
+| Test harness | DI harness in Nop.Tests (`ActivatorUtilities` on `BaseNopTest`), test subclass stubbing only the two render helpers | WAF on SQLite needs production seams in Nop.Data, outside "CC-only, additive" | Plan review F1, F2 |
+| WAF harness | Deferred to its own change | Full-pipeline coverage is worth having, but not at the cost of a data-layer change inside this refactor | Plan review F1 |
 | Guard mechanism | `protected virtual` helper returning an outcome, mapped per action | Preserves per-flow exits and override-ability; a filter would be inherited by overrides | Plan (Research: CC:268 precedent) |
 | Guard scope | All 20 guarded actions | Actually removes the lockstep-edit debt | Plan |
 | Pairs with shared step core | Shipping method + payment info | Closest pairs (0.85/0.87); payment-method diverges (0.64), confirm is the money path | Plan (Research: V34) |
@@ -38,12 +37,12 @@ The research ranked three checkout refactor opportunities. This plan implements 
 ## Scope
 
 **In scope:**
-- New test project `Tests/Nop.Web.Integration.Tests` (WAF, SQLite, isolated content root)
+- DI controller harness in `Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/`
 - Guard characterization (20 actions), shipping-method and payment-info characterization
 - Guard helper adopted in 13 multi-step-side actions (12 + `Index`) and 7 OPC actions
 - Shared step cores for the shipping-method and payment-info pairs
 
-**Out of scope:** opportunities #1 and #3; the payment-method, confirm and address pairs' bodies; a guard filter; constructor changes; any message, log, route or JSON change; the stale comment (N11); antiforgery on `OpcSavePaymentInfo` (N3); typing the OPC JSON contract (C8); CI workflow edits.
+**Out of scope:** opportunities #1 and #3; the payment-method, confirm and address pairs' bodies; a guard filter; constructor changes; any message, log, route or JSON change; the stale comment (N11); antiforgery on `OpcSavePaymentInfo` (N3); typing the OPC JSON contract (C8); CI workflow edits; a `WebApplicationFactory` harness (deferred, plan review F1).
 
 ## Architecture / Approach
 
@@ -59,8 +58,8 @@ Each action maps the outcome to its current exit. Multi-step actions return a re
 
 | Phase | What it delivers | Key risk |
 |---|---|---|
-| 1. WAF harness (gate) | Test project booting Nop.Web on SQLite, smoke tests | Startup writes git-ignored files into `Presentation/Nop.Web`; static-state collisions |
-| 2. Characterization tests | Pinned guard + pair behaviour, no prod change | Inducing an invalid payment form with the stock plugins |
+| 1. DI controller harness | Test base + `TestableCheckoutController` in Nop.Tests, smoke tests | Shared `BaseNopTest` state leaking between tests (restore in `[TearDown]`) |
+| 2. Characterization tests | Pinned guard + pair behaviour (incl. pickup and bypass branches), no prod change | Arranging test-only payment and pickup providers |
 | 3. Guard helper + multi-step | Helper, outcome types, 12 actions + `Index` adopted | Guard side-effect ordering (guest creation before the disabled check) |
 | 4. Guard in OPC | 7 OPC actions adopted, exact texts and logging kept | `OpcConfirmOrder` nested captcha position |
 | 5. Shipping step core | One shared shipping-method step | Preserving the multi-step-only `null` save |
@@ -71,8 +70,7 @@ Each action maps the outcome to its current exit. Multi-step actions return a re
 
 ## Open Risks & Assumptions
 
-- WAF boot on SQLite is unproven. The Phase 1 gate decides, with the DI fallback (no routing, filters or view rendering) pre-agreed.
-- The isolation check must use `git status --porcelain --ignored`; `App_Data/appsettings.json` and `plugins.json` are git-ignored.
+- The DI harness doesn't exercise routing, model binding, filters or Razor output. The storefront manual checks in Phases 3-6 cover those until the deferred WAF change lands.
 - Third-party CC subclasses and theme overrides are **[U]**. The additive-only contract is the mitigation.
 - Phase 2 tests become the behaviour oracle. Any edit to them in Phases 3-6 stops the phase as a suspected behaviour change.
 

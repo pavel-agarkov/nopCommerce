@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan carries out ranked opportunity **#2** from the research ([research.md](research.md), "Refactor opportunities" §2): deduplicate the one-page (OPC) and multi-step checkout flows in `CheckoutController` (CC), and replace the guard block inlined in 20 actions with one `protected virtual` helper. It is a **pure, behaviour-preserving refactor**. Characterization tests on a new `WebApplicationFactory` harness (in-memory SQLite, run by the existing `dotnet test` CI step) pin today's behaviour before the first structural change. Every phase is one revertible commit.
+This plan carries out ranked opportunity **#2** from the research ([research.md](research.md), "Refactor opportunities" §2): deduplicate the one-page (OPC) and multi-step checkout flows in `CheckoutController` (CC), and replace the guard block inlined in 20 actions with one `protected virtual` helper. It is a **pure, behaviour-preserving refactor**. Characterization tests on a DI harness in the existing Nop.Tests project (CC built from `BaseNopTest`'s service provider on in-memory SQLite, run by the existing `dotnet test` CI step) pin today's behaviour before the first structural change. A full-pipeline `WebApplicationFactory` harness is deferred to its own change (see "What We're NOT Doing"). Every phase is one revertible commit.
 
 Opportunities #1 (order-placement failure handling) and #3 (explicit placed-order id) are deliberately **not** in this change; see "What We're NOT Doing".
 
@@ -17,6 +17,8 @@ Paths below are relative to `src/` unless they start with `context/` or `.github
   Two actions vary:
   - **`OpcConfirmOrder`** (:2019), the seventh OPC action: the standard guard is nested inside the captcha branch, after the customer was already loaded for the captcha decision (:2023-2041).
   - **`Index`** (:342): no flow-mode check, and its guest condition also includes `downloadableProductsRequireRegistration` (:355-359).
+  
+  Two more actions have a partial, disabled-only guard: `SelectBillingAddress` (:647) and `SelectShippingAddress` (:804). That makes 22 `if (_orderSettings.CheckoutDisabled)` sites in total. Both actions are deliberately out of scope (see "What We're NOT Doing") and keep their inline check.
 - **Guard exits differ by flow.**
   - Multi-step actions return `RedirectToRoute(CART)` (disabled or empty cart), `RedirectToRoute(CHECKOUT_ONE_PAGE)` (OPC enabled), or `Challenge()` (guest not allowed).
   - `OnePageCheckout` GET is the same, except that a disabled OPC redirects to `CHECKOUT` (:1507-1508).
@@ -47,10 +49,10 @@ Paths below are relative to `src/` unless they start with `context/` or `.github
 
 ## Desired End State
 
-- A new test project, `Tests/Nop.Web.Integration.Tests`, boots Nop.Web through `WebApplicationFactory<Program>` on in-memory SQLite.
+- A DI harness in Nop.Tests (`Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/`) builds CC from `BaseNopTest`'s service provider on in-memory SQLite and calls its actions directly.
   - `dotnet test src` runs it in CI with no workflow change.
-  - It leaves no file under `Presentation/Nop.Web` created or modified, including git-ignored files such as `App_Data/appsettings.json` and `App_Data/plugins.json`.
-  - If the Phase 1 gate fails, the DI fallback harness in Nop.Tests takes its place, as agreed.
+  - It needs no production change outside CC.
+  - Its known gaps (no routing, model binding, filters or view engine) are listed in Phase 1.
 - Characterization tests pin:
   - every guard outcome of all 20 guarded actions;
   - every branch of the shipping-method and payment-info pairs.
@@ -66,7 +68,7 @@ Verification: the characterization suite is green at the Phase 2 commit, and gre
 
 ### Key Discoveries:
 
-- `BaseNopTest` already registers all 28 CC constructor dependencies, including every `ISettings` through reflection (BaseNopTest.cs:438-442). It also registers a `DefaultHttpContext`, `NopTestUrlHelper` (returns `""`), TempData and session (BaseNopTest.cs:235-257). The DI fallback is therefore viable.
+- `BaseNopTest` already registers all 28 CC constructor dependencies, including every `ISettings` through reflection (BaseNopTest.cs:438-442). It also registers a `DefaultHttpContext`, `NopTestUrlHelper` (returns `""`), TempData and session (BaseNopTest.cs:235-257). The DI harness is therefore viable.
 - `Program` is `public partial class Program` with a top-level `Main` that uses `WebApplication.CreateBuilder` (Nop.Web/Program.cs:8-12), which `WebApplicationFactory<Program>` supports.
 - On first boot, `BindApplicationSettings` writes `App_Data/appsettings.json` under the content root through `AppSettingsHelper.SaveAppSettings` (Nop.Web.Framework/Infrastructure/Extensions/ServiceCollectionExtensions.cs:81-86). That file, `plugins.json` and `installedPlugins.json` are git-ignored (`.gitignore`), so plain `git status` would not reveal pollution.
 - `DataSettingsManager.IsDatabaseInstalled()` is true when `DataConfig.ConnectionString` is non-empty (DataSettingsManager.cs:144-146). `DataConfig` comes from `AppSettings` (:124). Production `DataProviderManager` (NopDbStartup.cs:58) knows SqlServer, MySql and PostgreSQL only.
@@ -84,13 +86,14 @@ Verification: the characterization suite is green at the Phase 2 commit, and gre
 - **The non-guard actions** (`Completed`, `GetAddressById`, the address edit/delete actions, `SelectBillingAddress`, `SelectShippingAddress`, `OpcCompleteRedirectionPayment`): untouched.
 - **A guard `TypeFilterAttribute`.** It was rejected because it is inherited by overriding actions, which would change the contract for third-party subclasses, and because it runs at a different pipeline point.
 - **Constructor or existing-signature changes** on CC, and moving step logic into a new service.
-- **A real antiforgery token flow in tests.** A test-only bypass was chosen.
+- **A real antiforgery token flow in tests.** The DI harness calls actions directly, so filters, antiforgery among them, never run.
 - **Fixes noticed along the way:** the stale "X seconds" comment (N11), `[IgnoreAntiforgeryToken]` on `OpcSavePaymentInfo` (N3), and typing the OPC JSON contract (C8).
-- **CI workflow changes.** The new project runs under the existing `dotnet test src` step.
+- **CI workflow changes.** The new tests run under the existing `dotnet test src` step.
+- **A `WebApplicationFactory` harness.** Deferred to its own change (plan review F1). Booting Nop.Web on SQLite needs production seams in Nop.Data: `NopDbStartup` runs migrations through `BuildServiceProvider()` before WAF overrides apply (NopDbStartup.cs:65-71), `AddNopDbEngines` throws for any provider other than SqlServer/MySql/PostgreSQL (FluentMigratorExtensions.cs:68-79), plugins load only from `App_Data/plugins.json` at boot (PluginsInfo.cs:259-266), and `PublishAppStartedEventAsync` needs an installed DB before the first request. That is outside "CC-only, additive".
 
 ## Implementation Approach
 
-1. **Guard first.** Build the harness and gate on it (Phase 1). Then write characterization tests against the unchanged CC (Phase 2).
+1. **Guard first.** Build the DI harness and prove it with smoke tests (Phase 1). Then write characterization tests against the unchanged CC (Phase 2).
 2. **Structural change in small steps, one revertible commit each, Mikado-ordered:**
    - Introduce the guard helper and adopt it in the multi-step actions (Phase 3).
    - Adopt it in the OPC actions (Phase 4).
@@ -102,84 +105,64 @@ Verification: the characterization suite is green at the Phase 2 commit, and gre
 
 **Side-effect ordering in the guard.** `CheckoutDisabled` must be evaluated **before** `_workContext.GetCurrentCustomerAsync()`. On a first visit that call can create and persist a guest customer, and today a disabled checkout returns before it. Within the guest check, `IsGuestAsync(customer)` must still be evaluated before `AnonymousCheckoutAllowed` (today's `&&` order). In `OpcConfirmOrder` the helper runs where the inline guard runs today, inside the captcha branch. Re-reading the customer there returns the request-cached instance.
 
-**Harness isolation (Phase 1).** The default content root of `WebApplicationFactory` is the Nop.Web project directory, so a naive host writes git-ignored files into the developer's working tree. A stray `App_Data/appsettings.json` with a SQLite connection string would make a later local `Nop.Web` run think it is installed. The isolation check therefore uses `git status --porcelain --ignored`, not plain `git status`.
+**Shared test state (Phase 1).** `BaseNopTest` installs one store per test run and shares one `ServiceProvider` and `HttpContext` across tests. Every checkout test changes settings, cart and customer GenericAttributes, so each test must restore what it changed in `[TearDown]`. Otherwise test order would decide the outcome.
 
-**Static-state isolation.** The new project must not reference `BaseNopTest` or run any Nop.Tests fixture. Link the two SQLite source files (`SqLiteNopDataProvider.cs`, `TestDataProviderManager.cs`) into the project as compile items rather than adding a `ProjectReference` to Nop.Tests. This keeps Nop.Tests types (the `TestPaymentMethod` plugin and test settings) out of `WebAppTypeFinder`'s assembly scan.
-
-## Phase 1: WebApplicationFactory harness (gate)
+## Phase 1: DI controller harness
 
 ### Overview
 
-Add a new test project that boots the real Nop.Web pipeline on in-memory SQLite, installs a store, and lets tests send checkout requests as a guest customer. The phase ends at a **gate**: either the harness boots cleanly, or the plan switches to the agreed DI fallback.
+Add a test base in the existing Nop.Tests project that builds CC from `BaseNopTest`'s service provider on the in-memory SQLite store, and lets tests call checkout actions directly as the test customer. This is the primary harness (plan review F1); the WAF harness is deferred.
 
 ### Changes Required:
 
-#### 1. New test project
+#### 1. Controller test base
 
-**File**: `Tests/Nop.Web.Integration.Tests/Nop.Web.Integration.Tests.csproj`, plus the `src/NopCommerce.sln` entry under the existing `Tests` solution folder
+**File**: `Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/CheckoutControllerTestBase.cs`
 
-**Intent**: Host the WAF characterization tests in their own assembly, so the process-wide statics set by Nop.Web startup never meet `BaseNopTest`'s.
-
-**Contract**:
-- `net10.0` (inherited from `Directory.Build.props`).
-- NUnit, NUnit3TestAdapter, Microsoft.NET.Test.Sdk and AwesomeAssertions, at the versions Nop.Tests.csproj uses.
-- `Microsoft.AspNetCore.Mvc.Testing`, matching the repo's ASP.NET Core 10.0.x patch.
-- `ProjectReference` to `Presentation/Nop.Web`.
-- `SqLiteNopDataProvider.cs` and `TestDataProviderManager.cs` linked from `Tests/Nop.Tests/` as `<Compile Include=… Link=…>`, with no reference to Nop.Tests.
-
-#### 2. Web application factory
-
-**File**: `Tests/Nop.Web.Integration.Tests/NopWebApplicationFactory.cs`
-
-**Intent**: Boot Nop.Web against a fresh in-memory SQLite database, install the store with the same `InstallationSettings` as `BaseNopTest.Init`, and install the plugins the checkout needs (`Payments.CheckMoneyOrder`, `Shipping.FixedByWeightByTotal`). Neither the boot nor the tests may touch the source tree.
+**Intent**: Build a fresh CC per test against the shared store, so the characterization tests exercise the real action bodies and real services.
 
 **Contract**:
-- `WebApplicationFactory<Nop.Web.Program>` with an overridden host configuration that:
-  - (a) points the content root at a per-run temp copy, or otherwise redirects every `App_Data` and `Plugins` write away from `Presentation/Nop.Web`. The implementer picks the mechanism; the invariant is the isolation success criterion below.
-  - (b) supplies a `DataConfig` whose non-empty connection string targets a shared-cache in-memory SQLite database kept open for the factory's lifetime.
-  - (c) replaces `IDataProviderManager` with the linked `TestDataProviderManager`.
-  - (d) registers a test-only antiforgery bypass, for example by replacing `IAntiforgery` with a validating no-op, so POSTs succeed without tokens.
-- One factory per test run (NUnit `[SetUpFixture]`).
-- The client keeps cookies, so successive requests act as the same guest customer.
+- Derives from `BaseNopTest` (via the existing `WebTest` base if it fits); no new project and no `NopCommerce.sln` change.
+- Builds a test-only subclass `TestableCheckoutController : CheckoutController` with `ActivatorUtilities.CreateInstance<TestableCheckoutController>(ServiceProvider)`, with a `ControllerContext` on the shared `HttpContext`, and sets `Url`, `TempData` and `ModelState` as `BaseNopTest` registers them.
+- The subclass overrides only the two `protected virtual` rendering helpers on `BaseController` (BaseController.cs:46, :73): `RenderPartialViewToStringAsync(viewName, model)` returns `"<partial:{viewName}>"` and `RenderViewComponentToStringAsync(componentType, …)` returns `"<component:{componentType.Name}>"`. It overrides nothing else, so every action body and every CC helper runs as in production.
+- Checkout dependencies the store needs (a payment method, a shipping rate computation method, a pickup point provider) come from what `BaseNopTest` already registers (e.g. `TestPaymentMethod`) or from a test-only plugin in Nop.Tests; the implementer notes the choice in the base class.
 
-#### 3. Test helpers
+#### 2. Test helpers
 
-**File**: `Tests/Nop.Web.Integration.Tests/CheckoutTestHelpers.cs` (name at the implementer's discretion)
+**File**: same folder, `CheckoutTestHelpers.cs` (name at the implementer's discretion)
 
 **Intent**: Give tests a small vocabulary for arranging and asserting:
-- set `OrderSettings`, `ShippingSettings`, `PaymentSettings` and `CaptchaSettings` values through `ISettingService` in a host scope, and restore them after each test;
-- add a sample product to the current guest's cart, or clear the cart;
-- set or clear the customer's checkout GenericAttributes (selected/offered shipping options, selected payment method);
-- read a response as either a redirect (status + `Location`) or JSON (parsed keys/values).
+- set `OrderSettings`, `ShippingSettings`, `PaymentSettings` and `CaptchaSettings` values through `ISettingService`, and restore them in `[TearDown]`;
+- add a sample product to the current customer's cart, or clear the cart;
+- set or clear the customer's checkout GenericAttributes (selected/offered shipping options, selected payment method), and restore them in `[TearDown]`;
+- read a result as `RedirectToRouteResult.RouteName`, `ChallengeResult`, `ViewResult` (view name and model type) or `JsonResult.Value` (keys and values).
 
 **Contract**: Test-only; no production code.
 
-#### 4. Gate smoke test
+#### 3. Harness smoke test
 
-**File**: `Tests/Nop.Web.Integration.Tests/HarnessSmokeTests.cs`
+**File**: same folder, `CheckoutHarnessSmokeTests.cs`
 
-**Intent**: Prove that the harness works end to end before Phase 2 depends on it.
+**Intent**: Prove that the harness works before Phase 2 depends on it.
 
 **Contract**: Two tests:
-- a guest with an empty cart doing `GET /checkout` is redirected to the cart route;
-- a guest with one cart item, OPC enabled and shipping not required, sending `POST` to `OpcSaveShippingMethod` gets JSON `{ error: 1, message: "Shipping is not required" }`.
+- with an empty cart, `Index()` returns `RedirectToRouteResult` with the cart route name;
+- with one cart item, OPC enabled and shipping not required, `OpcSaveShippingMethod(...)` returns `JsonResult` `{ error = 1, message = "Shipping is not required" }`.
 
-**Gate / fallback (agreed):** if the harness can't meet every automated criterion below, do not keep tuning it. Switch to the **DI fallback**: `Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/CheckoutControllerTests.cs` deriving from the existing test base. It builds CC with `ActivatorUtilities.CreateInstance` on `ServiceProvider`, with a `ControllerContext` on the shared `HttpContext`. It asserts `RedirectToRouteResult.RouteName`, `ChallengeResult`, `ViewResult` and `JsonResult.Value`. Record the gate outcome and the reason in the Phase 1 block of this plan before continuing. Known gap of the fallback: no routing, no model binding, no filters. OPC branches that call `RenderPartialViewToStringAsync` need a view engine that `BaseNopTest` doesn't register, so those branches are asserted only up to the call, or skipped with a note.
+**Known gaps of the DI harness** (accepted with F1): no routing, no model binding, no filters (`[AutoValidateAntiforgeryToken]`, `[ValidateCaptcha]`, `[FormValueRequired]` are not exercised), and no view engine. Rendered HTML is replaced by the marker strings above (plan review F2), so tests pin which partial or component a branch renders, but not its Razor output. No phase changes views. `ViewResult`s are asserted by view name and model type, which needs no view engine.
 
 ### Success Criteria:
 
 #### Automated Verification:
 
 - Solution builds: `dotnet build --configuration Release src`
-- New project's tests pass: `dotnet test --no-build --configuration Release src/Tests/Nop.Web.Integration.Tests`
+- Harness smoke tests pass: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests --filter "FullyQualifiedName~Nop.Tests.Nop.Web.Tests.Public.Controllers.Checkout"`
 - Existing tests still pass: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests`
 - Full CI-equivalent run passes: `dotnet test --no-build --configuration Release src`
-- Source tree stays clean: the output of `git status --porcelain --ignored src/Presentation/Nop.Web` is identical before and after a test run
 
 #### Manual Verification:
 
-- Gate outcome (WAF or DI fallback) and reason recorded in this phase block
-- Local `Nop.Web` still starts in its previous state (installed or install wizard) after running the new tests
+- Running the smoke tests twice in one session, and in reverse order, gives the same results (shared-state restore works)
 
 **Implementation Note**: After completing this phase and all automated verification passes, pause here for manual confirmation from the human that the manual testing was successful before proceeding to the next phase.
 
@@ -195,7 +178,7 @@ Pin the current behaviour of every guard outcome in all 20 guarded actions, and 
 
 #### 1. Guard characterization
 
-**File**: `Tests/Nop.Web.Integration.Tests/Checkout/CheckoutGuardTests.cs`
+**File**: `Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/CheckoutGuardTests.cs`
 
 **Intent**: For each of the 20 actions, assert the exact exit for each guard condition it checks, in today's order:
 - checkout disabled;
@@ -204,35 +187,38 @@ Pin the current behaviour of every guard outcome in all 20 guarded actions, and 
 - guest with anonymous checkout disallowed.
 
 **Contract**:
-- **Multi-step actions** (12): the redirect route (`CART` / `CHECKOUT_ONE_PAGE`) or a `Challenge` (302 to the login path).
-- **`OnePageCheckout` GET**: `CART` / `CHECKOUT` / `Challenge`.
-- **The 6 OPC POSTs**: JSON `{ error: 1, message: <exact text> }`, with the localized `Checkout.Disabled` text read from `ILocalizationService` in the test, plus a warning log entry for the current customer.
+- **Multi-step actions** (12): `RedirectToRouteResult.RouteName` (`CART` / `CHECKOUT_ONE_PAGE`) or a `ChallengeResult`.
+- **`OnePageCheckout` GET**: `CART` / `CHECKOUT` / `ChallengeResult`.
+- **The 6 OPC POSTs**: `JsonResult` `{ error = 1, message = <exact text> }`, with the localized `Checkout.Disabled` text read from `ILocalizationService` in the test, plus a warning log entry for the current customer.
 - **`OpcConfirmOrder`**: the same JSON with the captcha disabled.
 - **`Index`**: `CART` for disabled and for an empty cart; `Challenge` for a guest when anonymous checkout is disallowed, and also when downloadable products require registration.
 - **Precedence**: a case with two conditions true at once (e.g. checkout disabled and an empty cart) asserts the first-checked exit.
-- Parameterize with NUnit `[TestCase]` per action/condition. Test the multi-step POST actions with the `nextstep` form field so that `[FormValueRequired("nextstep")]` selects them.
+- Parameterize with NUnit `[TestCase]` per action/condition. Call the multi-step POST actions directly, passing a `FormCollection` that includes `nextstep`, as `[FormValueRequired("nextstep")]` would require over HTTP.
 
 #### 2. Shipping-method pair characterization
 
-**File**: `Tests/Nop.Web.Integration.Tests/Checkout/ShippingMethodStepTests.cs`
+**File**: `Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/ShippingMethodStepTests.cs`
 
 **Intent**: Pin every branch of `SelectShippingMethod` and `OpcSaveShippingMethod` listed under Current State Analysis, including the stored state.
 
 **Contract**:
-- **Per branch:** the exit (redirect route, re-rendered `ShippingMethod` view 200, JSON keys `update_section.name`, `goto_section`, `error`, `message`) and the resulting `SelectedShippingOptionAttribute`, `SelectedPickupPointAttribute` and `DesiredDeliveryDate` values. Read them back through `IGenericAttributeService` in a host scope.
+- **Per branch:** the exit (redirect route name, re-rendered `ShippingMethod` `ViewResult`, JSON keys `update_section.name`, `goto_section`, `error`, `message`) and the resulting `SelectedShippingOptionAttribute`, `SelectedPickupPointAttribute` and `DesiredDeliveryDate` values. Read them back through `IGenericAttributeService`.
 - **Branches:**
   - shipping not required (multi-step saves `null`; OPC saves nothing);
   - pickup in store chosen;
   - pickup offered but not chosen;
+  - pickup point not allowed: `ParsePickupOptionAsync` throws `"Pickup point is not allowed"` (CC:187). Multi-step lets the exception escape (assert it is thrown); OPC returns `{ error = 1, message }`;
   - empty option string;
   - malformed option (no separator);
   - option not found;
+  - invalid option with `BypassShippingMethodSelectionIfOnlyOne` on and one available option: the multi-step fallback to `ShippingMethod()` auto-saves that option and redirects (CC:949-958). Pin the redirect and the saved GA state;
   - success with offered options cached in GA;
   - success with no cached options (loaded from the shipping service).
+- **Pickup arrangements:** the pickup branches need `ShippingSettings.AllowPickupInStore` and `DisplayPickupInStoreOnShippingMethodPage` both on (the second defaults to false, InstallRequiredData.cs:1874), plus a test-only `IPickupPointProvider` in Nop.Tests that returns one pickup point. Restore both settings in `[TearDown]`.
 
 #### 3. Payment-info pair characterization
 
-**File**: `Tests/Nop.Web.Integration.Tests/Checkout/PaymentInfoStepTests.cs`
+**File**: `Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/PaymentInfoStepTests.cs`
 
 **Intent**: Pin every branch of `EnterPaymentInfo` and `OpcSavePaymentInfo` listed under Current State Analysis.
 
@@ -240,16 +226,17 @@ Pin the current behaviour of every guard outcome in all 20 guarded actions, and 
 - **Branches:**
   - payment workflow not required (multi-step only, redirect to `CHECKOUT_CONFIRM`);
   - no selected method (redirect to `CHECKOUT_PAYMENT_METHOD` vs JSON `"Payment method is not selected"`);
-  - valid form (redirect to `CHECKOUT_CONFIRM` vs JSON `update_section.name = "confirm-order"`, `goto_section = "confirm_order"`, non-empty `html`);
-  - invalid form (multi-step 200 view vs JSON `update_section.name = "payment-info"`).
+  - valid form (redirect to `CHECKOUT_CONFIRM` vs JSON `update_section.name = "confirm-order"`, `goto_section = "confirm_order"`, `html = "<partial:OpcConfirmOrder>"`);
+  - invalid form (multi-step `ViewResult` vs JSON `update_section.name = "payment-info"`).
 - Check that the process payment request was stored on the valid paths (`IOrderProcessingService.GetProcessPaymentRequestAsync` returns non-null), and not stored on the invalid paths.
-- **Inducing an invalid form.** CheckMoneyOrder accepts any form, so this branch needs a payment method whose `ValidatePaymentFormAsync` can return a warning. Use the stock plugin that validates its form, or a test-only `IPaymentMethod` plugin registered in the test host. The implementer picks one and notes the choice in the test file. If neither can be induced in the WAF host, assert that branch in the DI harness and record why.
+- **Rendering branches pinned through the marker strings** (plan review F2): `OpcLoadStepAfterShippingMethod` (its `update_section.name`, `goto_section` and `html` marker), the `confirm-order` and `payment-info` JSON of `OpcSavePaymentInfo`, and the multi-step re-renders (`ShippingMethod()` and `EnterPaymentInfo`'s `View(model)`), asserted by view name and model type. A branch that can't be pinned this way is listed in the test file with the reason.
+- **Inducing an invalid form.** This branch needs a payment method whose `ValidatePaymentFormAsync` can return a warning. Use a test-only `IPaymentMethod` in Nop.Tests (or extend `TestPaymentMethod`) and note the choice in the test file.
 
 ### Success Criteria:
 
 #### Automated Verification:
 
-- All characterization tests pass against unchanged production code: `dotnet test --no-build --configuration Release src/Tests/Nop.Web.Integration.Tests`
+- All characterization tests pass against unchanged production code: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests --filter "FullyQualifiedName~Nop.Tests.Nop.Web.Tests.Public.Controllers.Checkout"`
 - Production code unchanged in this phase: `git diff --stat HEAD~1 -- src/Presentation src/Libraries` is empty for the phase commit
 - Every one of the 20 guarded actions appears in at least one guard test case (checked by a test that reflects over CC's `public virtual` action methods against an explicit expected list of 20)
 - Full suite passes: `dotnet test --no-build --configuration Release src`
@@ -309,9 +296,14 @@ Introduce the shared guard helper and its outcome type, then replace the inlined
 
 #### Automated Verification:
 
-- Characterization suite passes unedited: `dotnet test --no-build --configuration Release src/Tests/Nop.Web.Integration.Tests`
-- Test files unchanged since Phase 2: `git diff <phase-2-sha> HEAD -- src/Tests/Nop.Web.Integration.Tests` is empty
-- No existing CC member signature changed: the `public/protected virtual` member list of CC at HEAD is a superset of the list at `<phase-2-sha>` (ast-grep V1 rule)
+- Characterization suite passes unedited: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests --filter "FullyQualifiedName~Nop.Tests.Nop.Web.Tests.Public.Controllers.Checkout"`
+- Test files unchanged since Phase 2: `git diff <phase-2-sha> HEAD -- src/Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout` is empty
+- No existing CC member signature changed: every `public/protected virtual` declaration of CC at `<phase-2-sha>` is present, unchanged, at HEAD. Checked by `context/changes/refactor-opportunities/checks/cc-virtual-signatures.sh <phase-2-sha>`, created in this phase (plan review F5). The script:
+  - runs the research V1 rule, saved as `checks/cc-virtual-members.yml` (`method_declaration` / `property_declaration` that `has` a `modifier` matching `^virtual$`), with `ast-grep scan --rule … --json` against `git show <sha>:src/Presentation/Nop.Web/Controllers/CheckoutController.cs` and against the working-tree file;
+  - reduces each match to its declaration text up to the body (`{` or `=>`): access modifier, return type, name and full parameter list, with whitespace normalized;
+  - exits non-zero if any old declaration is missing from the new set, and prints the missing ones. New declarations are allowed.
+  
+  Phases 4-6 run the same script.
 - Full suite passes: `dotnet test --no-build --configuration Release src`
 
 #### Manual Verification:
@@ -362,9 +354,9 @@ For `Passed` it does nothing. The exception type stays `System.Exception`.
 
 #### Automated Verification:
 
-- Characterization suite passes unedited: `dotnet test --no-build --configuration Release src/Tests/Nop.Web.Integration.Tests`
-- Test files unchanged since Phase 2: `git diff <phase-2-sha> HEAD -- src/Tests/Nop.Web.Integration.Tests` is empty
-- No inlined guard copies remain: ast-grep `if (_orderSettings.CheckoutDisabled) $B` in CC matches only inside `ValidateCheckoutAccessAsync` (1 match)
+- Characterization suite passes unedited: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests --filter "FullyQualifiedName~Nop.Tests.Nop.Web.Tests.Public.Controllers.Checkout"`
+- Test files unchanged since Phase 2: `git diff <phase-2-sha> HEAD -- src/Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout` is empty
+- No inlined guard copies remain: ast-grep `if (_orderSettings.CheckoutDisabled) $B` in CC gives exactly 3 matches, inside `ValidateCheckoutAccessAsync`, `SelectBillingAddress` and `SelectShippingAddress` (the two out-of-scope partial guards)
 - No existing CC member signature changed (V1 superset check as in Phase 3)
 - Full suite passes: `dotnet test --no-build --configuration Release src`
 
@@ -414,8 +406,8 @@ Move the shared logic of `SelectShippingMethod` and `OpcSaveShippingMethod` into
 
 #### Automated Verification:
 
-- Characterization suite passes unedited: `dotnet test --no-build --configuration Release src/Tests/Nop.Web.Integration.Tests`
-- Test files unchanged since Phase 2: `git diff <phase-2-sha> HEAD -- src/Tests/Nop.Web.Integration.Tests` is empty
+- Characterization suite passes unedited: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests --filter "FullyQualifiedName~Nop.Tests.Nop.Web.Tests.Public.Controllers.Checkout"`
+- Test files unchanged since Phase 2: `git diff <phase-2-sha> HEAD -- src/Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout` is empty
 - Shared logic exists once: ast-grep `$S.GetShippingOptionsAsync($$$)` in CC no longer appears in either `SelectShippingMethod` or `OpcSaveShippingMethod`, only in the step method and in calls outside the pair
 - No existing CC member signature changed (V1 superset check)
 - Full suite passes: `dotnet test --no-build --configuration Release src`
@@ -461,8 +453,8 @@ Move the shared load-method, validate-form and save-request logic of `EnterPayme
 
 #### Automated Verification:
 
-- Characterization suite passes unedited: `dotnet test --no-build --configuration Release src/Tests/Nop.Web.Integration.Tests`
-- Test files unchanged since Phase 2: `git diff <phase-2-sha> HEAD -- src/Tests/Nop.Web.Integration.Tests` is empty
+- Characterization suite passes unedited: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests --filter "FullyQualifiedName~Nop.Tests.Nop.Web.Tests.Public.Controllers.Checkout"`
+- Test files unchanged since Phase 2: `git diff <phase-2-sha> HEAD -- src/Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout` is empty
 - Shared logic exists once: ast-grep `$P.ValidatePaymentFormAsync($$$)` in CC matches only inside `SavePaymentInfoStepAsync`
 - No existing CC member signature changed (V1 superset check)
 - Full suite passes: `dotnet test --no-build --configuration Release src`
@@ -483,10 +475,10 @@ Move the shared load-method, validate-form and save-request logic of `EnterPayme
 
 ### Integration Tests:
 
-- **WAF characterization suite** (Phase 2): guard outcomes of all 20 actions, both pairs' branches, the GA state those branches write, and warning-log entries on OPC guard failures.
+- **DI characterization suite** (Phase 2): guard outcomes of all 20 actions, both pairs' branches, the GA state those branches write, and warning-log entries on OPC guard failures, asserted at the action level with the known gaps recorded in Phase 1.
 - **Precedence cases**: two guard conditions true at once.
 - **Fixed after Phase 2.** The suite is written once and never edited in Phases 3-6; any edit is evidence of a behaviour change and stops the phase.
-- **DI fallback** (only if the Phase 1 gate fails): the same cases at the action level, with the known gaps recorded in Phase 1.
+- **Full-pipeline (WAF) coverage**: deferred to its own change (see "What We're NOT Doing"); the storefront manual checks in Phases 3-6 cover routing, filters and views meanwhile.
 
 ### Manual Testing Steps:
 
@@ -497,7 +489,7 @@ Move the shared load-method, validate-form and save-request logic of `EnterPayme
 
 ## Performance Considerations
 
-None expected. The guard helper performs the same calls in the same order, and `GetShoppingCartAsync` / `IsGuestAsync` are already request-cached (research C7). The new test project adds one store installation per test run to CI time.
+None expected. The guard helper performs the same calls in the same order, and `GetShoppingCartAsync` / `IsGuestAsync` are already request-cached (research C7). The new tests reuse the store Nop.Tests already installs per run.
 
 ## Migration Notes
 
@@ -516,20 +508,18 @@ None. There is no schema, setting, resource, route or view change. Third-party C
 
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles. See `references/progress-format.md`.
 
-### Phase 1: WebApplicationFactory harness (gate)
+### Phase 1: DI controller harness
 
 #### Automated
 
 - [ ] 1.1 Solution builds: `dotnet build --configuration Release src`
-- [ ] 1.2 New project's tests pass: `dotnet test --no-build --configuration Release src/Tests/Nop.Web.Integration.Tests`
+- [ ] 1.2 Harness smoke tests pass
 - [ ] 1.3 Existing tests still pass: `dotnet test --no-build --configuration Release src/Tests/Nop.Tests`
 - [ ] 1.4 Full CI-equivalent run passes: `dotnet test --no-build --configuration Release src`
-- [ ] 1.5 Source tree stays clean: the output of `git status --porcelain --ignored src/Presentation/Nop.Web` is identical before and after a test run
 
 #### Manual
 
-- [ ] 1.6 Gate outcome (WAF or DI fallback) and reason recorded in this phase block
-- [ ] 1.7 Local `Nop.Web` still starts in its previous state (installed or install wizard) after running the new tests
+- [ ] 1.5 Smoke tests give the same results run twice and in reverse order
 
 ### Phase 2: Characterization tests
 
