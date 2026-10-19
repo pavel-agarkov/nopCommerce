@@ -13,6 +13,7 @@ using Nop.Core.Domain.Payments;
 using Nop.Core.Domain.Security;
 using Nop.Core.Domain.Shipping;
 using Nop.Core.Domain.Tax;
+using Nop.Core.Infrastructure;
 using Nop.Services.Attributes;
 using Nop.Services.Catalog;
 using Nop.Services.Common;
@@ -23,9 +24,13 @@ using Nop.Services.Localization;
 using Nop.Services.Logging;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
+using Nop.Services.Plugins;
 using Nop.Services.Shipping;
 using Nop.Services.Tax;
 using Nop.Tests.Nop.Services.Tests;
+using Nop.Tests.Nop.Services.Tests.Payments;
+using Nop.Tests.Nop.Services.Tests.Shipping;
+using Nop.Tests.Nop.Services.Tests.Tax;
 using Nop.Web.Controllers;
 using Nop.Web.Factories;
 using NUnit.Framework;
@@ -43,7 +48,10 @@ namespace Nop.Tests.Nop.Web.Tests.Public.Controllers.Checkout;
 /// Checkout dependencies: the base derives from <see cref="ServiceTest"/> (not <see cref="WebTest"/>) because
 /// ServiceTest already registers the test plugins checkout needs: the payment method "Payments.TestMethod"
 /// (TestPaymentMethod), the shipping rate computation method "FixedRateTestShippingRateComputationMethod"
-/// and the pickup point provider "PickupPoint.TestProvider". No new plugin is added.
+/// and the pickup point provider "PickupPoint.TestProvider". ServiceTest and WebTest both replace the global
+/// plugin list when a fixture is constructed, so [SetUp] installs the checkout plugin list (those test plugins plus
+/// the tax provider "FixedTaxRateTest" and <see cref="SingleOptionTestShippingRateComputationMethod"/>, the only
+/// plugin added for checkout tests) and [TearDown] puts the previous list back.
 ///
 /// Shared state: the store, ServiceProvider and HttpContext are shared by the whole test run, so every test
 /// gets a fresh <see cref="CheckoutTestHelpers"/> in [SetUp] that snapshots settings, the customer's cart and
@@ -60,9 +68,21 @@ public abstract class CheckoutControllerTestBase : ServiceTest
     /// </summary>
     protected CheckoutTestHelpers Checkout { get; private set; }
 
+    private IPluginsInfo _previousPluginsInfo;
+
+    static CheckoutControllerTestBase()
+    {
+        //register the type converters the application registers at startup (BaseNopTest registers only the list ones);
+        //checkout stores ShippingOption, List<ShippingOption> and PickupPoint values in generic attributes through them
+        new TypeConverterRegistrationStartUpTask().Execute();
+    }
+
     [SetUp]
     public async Task CheckoutControllerSetUpAsync()
     {
+        _previousPluginsInfo = Singleton<IPluginsInfo>.Instance;
+        Singleton<IPluginsInfo>.Instance = CreateCheckoutPluginsInfo();
+
         Checkout = new CheckoutTestHelpers(ServiceProvider);
         await Checkout.CaptureStateAsync();
     }
@@ -70,11 +90,62 @@ public abstract class CheckoutControllerTestBase : ServiceTest
     [TearDown]
     public async Task CheckoutControllerTearDownAsync()
     {
-        if (Checkout != null)
-            await Checkout.RestoreStateAsync();
+        try
+        {
+            if (Checkout != null)
+                await Checkout.RestoreStateAsync();
 
-        Checkout = null;
+            Checkout = null;
+        }
+        finally
+        {
+            Singleton<IPluginsInfo>.Instance = _previousPluginsInfo;
+            _previousPluginsInfo = null;
+        }
     }
+
+    /// <summary>
+    /// The plugin list checkout tests need; a plugin still has to be active in the settings to be used
+    /// </summary>
+    private static PluginsInfo CreateCheckoutPluginsInfo()
+    {
+        static (PluginDescriptor, bool) Descriptor(Type pluginType, string systemName) =>
+            (new PluginDescriptor
+            {
+                PluginType = pluginType,
+                SystemName = systemName,
+                FriendlyName = systemName,
+                Installed = true,
+                ReferencedAssembly = pluginType.Assembly
+            }, true);
+
+        return new PluginsInfo(CommonHelper.DefaultFileProvider)
+        {
+            PluginDescriptors = new List<(PluginDescriptor, bool)>
+            {
+                Descriptor(typeof(FixedRateTestTaxProvider), "FixedTaxRateTest"),
+                Descriptor(typeof(FixedRateTestShippingRateComputationMethod), FixedRateShippingMethodSystemName),
+                Descriptor(typeof(SingleOptionTestShippingRateComputationMethod), SingleOptionTestShippingRateComputationMethod.SystemName),
+                Descriptor(typeof(TestPaymentMethod), TestPaymentMethodSystemName),
+                Descriptor(typeof(PickupPointTestProvider), PickupPointProviderSystemName)
+            }
+        };
+    }
+
+    /// <summary>
+    /// System name of the test shipping rate computation method that offers "Shipping option 1" and "Shipping option 2"
+    /// </summary>
+    protected const string FixedRateShippingMethodSystemName = "FixedRateTestShippingRateComputationMethod";
+
+    /// <summary>
+    /// System name of the test payment method
+    /// </summary>
+    protected const string TestPaymentMethodSystemName = "Payments.TestMethod";
+
+    /// <summary>
+    /// System name of the test pickup point provider (pickup points "1", "2" and "3")
+    /// </summary>
+    protected const string PickupPointProviderSystemName = "PickupPoint.TestProvider";
 
     /// <summary>
     /// Create a service provider that builds the controller's transient dependency graph
@@ -121,6 +192,15 @@ public abstract class CheckoutControllerTestBase : ServiceTest
         }
 
         return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Resolve a service from a fresh per-call provider (see <see cref="CreateControllerServiceProvider"/>),
+    /// for services with a deep transient graph such as IOrderProcessingService
+    /// </summary>
+    protected T ResolveFresh<T>()
+    {
+        return CreateControllerServiceProvider().GetRequiredService<T>();
     }
 
     /// <summary>

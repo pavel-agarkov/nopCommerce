@@ -6,6 +6,7 @@ using Nop.Core.Configuration;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
+using Nop.Core.Domain.Logging;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Core.Domain.Security;
@@ -13,6 +14,7 @@ using Nop.Core.Domain.Shipping;
 using Nop.Data;
 using Nop.Services.Common;
 using Nop.Services.Configuration;
+using Nop.Services.Customers;
 using Nop.Services.Orders;
 using NUnit.Framework;
 
@@ -24,7 +26,9 @@ namespace Nop.Tests.Nop.Web.Tests.Public.Controllers.Checkout;
 /// <remarks>
 /// <see cref="CaptureStateAsync"/> snapshots what checkout tests change in the shared store
 /// (the settings changed through <see cref="SetSettingsAsync{TSettings}"/>, the current customer's cart items
-/// and the current customer's generic attributes, plus any sample product switched to "no shipping");
+/// and the current customer's generic attributes, plus any sample product changed through
+/// <see cref="AddSampleProductToCartAsync"/> or <see cref="UpdateProductAsync"/>, customer role mappings added through
+/// <see cref="MakeCurrentCustomerGuestAsync"/> and log records written during the test);
 /// <see cref="RestoreStateAsync"/> puts them back,
 /// so the outcome of a test does not depend on test order.
 /// </remarks>
@@ -36,6 +40,8 @@ public class CheckoutTestHelpers
     private readonly List<Func<Task>> _settingsRestorers = new();
     private readonly HashSet<Type> _changedSettingsTypes = new();
     private readonly List<Func<Task>> _productRestorers = new();
+    private readonly List<Func<Task>> _customerRestorers = new();
+    private int _lastLogIdSnapshot;
     private List<ShoppingCartItem> _cartSnapshot = new();
     private List<GenericAttribute> _genericAttributesSnapshot = new();
 
@@ -143,6 +149,16 @@ public class CheckoutTestHelpers
         }
     }
 
+    private async Task RestoreLogAsync()
+    {
+        var logRepository = GetService<IRepository<Log>>();
+        var lastLogId = _lastLogIdSnapshot;
+
+        var added = await logRepository.Table.Where(log => log.Id > lastLogId).ToListAsync();
+        if (added.Any())
+            await logRepository.DeleteAsync(added);
+    }
+
     private async Task RestoreGenericAttributesAsync(Customer customer)
     {
         var genericAttributeService = GetService<IGenericAttributeService>();
@@ -192,6 +208,8 @@ public class CheckoutTestHelpers
         _settingsRestorers.Clear();
         _changedSettingsTypes.Clear();
         _productRestorers.Clear();
+        _customerRestorers.Clear();
+        _lastLogIdSnapshot = await GetService<IRepository<Log>>().Table.MaxAsync(log => (int?)log.Id) ?? 0;
     }
 
     /// <summary>
@@ -210,11 +228,17 @@ public class CheckoutTestHelpers
 
         _productRestorers.Clear();
 
+        foreach (var restore in _customerRestorers)
+            await restore();
+
+        _customerRestorers.Clear();
+
         var customer = await GetCurrentCustomerAsync();
 
         //the cart goes first: deleting cart items may reset checkout generic attributes
         await RestoreCartAsync(customer);
         await RestoreGenericAttributesAsync(customer);
+        await RestoreLogAsync();
     }
 
     #endregion
@@ -229,6 +253,38 @@ public class CheckoutTestHelpers
     public async Task<int> GetCurrentStoreIdAsync()
     {
         return (await GetService<IStoreContext>().GetCurrentStoreAsync()).Id;
+    }
+
+    /// <summary>
+    /// Put the current customer into the "Guests" role, so CustomerService.IsGuestAsync returns true for it;
+    /// the role mapping is removed in [TearDown]
+    /// </summary>
+    public async Task MakeCurrentCustomerGuestAsync()
+    {
+        var customerService = GetService<ICustomerService>();
+        var customer = await GetCurrentCustomerAsync();
+
+        if (await customerService.IsGuestAsync(customer))
+            return;
+
+        var guestRole = await customerService.GetCustomerRoleBySystemNameAsync(NopCustomerDefaults.GuestsRoleName);
+        await customerService.AddCustomerRoleMappingAsync(new CustomerCustomerRoleMapping { CustomerId = customer.Id, CustomerRoleId = guestRole.Id });
+        _customerRestorers.Add(() => customerService.RemoveCustomerRoleMappingAsync(customer, guestRole));
+    }
+
+    /// <summary>
+    /// Get warning log records written for the given customer since <see cref="CaptureStateAsync"/>
+    /// (every record written during the test is deleted in [TearDown])
+    /// </summary>
+    public async Task<IList<Log>> GetWarningLogsSinceCaptureAsync(int customerId)
+    {
+        var lastLogId = _lastLogIdSnapshot;
+        var warning = (int)LogLevel.Warning;
+
+        return await GetService<IRepository<Log>>().Table
+            .Where(log => log.Id > lastLogId && log.LogLevelId == warning && log.CustomerId == customerId)
+            .OrderBy(log => log.Id)
+            .ToListAsync();
     }
 
     #endregion
@@ -260,6 +316,8 @@ public class CheckoutTestHelpers
     public Task SetPaymentSettingsAsync(Action<PaymentSettings> change) => SetSettingsAsync(change);
 
     public Task SetCaptchaSettingsAsync(Action<CaptchaSettings> change) => SetSettingsAsync(change);
+
+    public Task SetCustomerSettingsAsync(Action<CustomerSettings> change) => SetSettingsAsync(change);
 
     #endregion
 
@@ -338,6 +396,31 @@ public class CheckoutTestHelpers
         return null;
     }
 
+    /// <summary>
+    /// Change a product; Price, IsDownload and IsShipEnabled are the properties restored in [TearDown]
+    /// </summary>
+    public async Task UpdateProductAsync(Product product, Action<Product> change)
+    {
+        var productRepository = GetService<IRepository<Product>>();
+        var productId = product.Id;
+
+        var original = await productRepository.GetByIdAsync(productId);
+        var (price, isDownload, isShipEnabled) = (original.Price, original.IsDownload, original.IsShipEnabled);
+
+        change(original);
+        await productRepository.UpdateAsync(original);
+
+        //insert at the start, so the restorers run in reverse order and the oldest values win
+        _productRestorers.Insert(0, async () =>
+        {
+            var changed = await productRepository.GetByIdAsync(productId);
+            changed.Price = price;
+            changed.IsDownload = isDownload;
+            changed.IsShipEnabled = isShipEnabled;
+            await productRepository.UpdateAsync(changed);
+        });
+    }
+
     #endregion
 
     #region Checkout generic attributes
@@ -354,6 +437,12 @@ public class CheckoutTestHelpers
             NopCustomerDefaults.OfferedShippingOptionsAttribute, shippingOptions, await GetCurrentStoreIdAsync());
     }
 
+    public async Task SetSelectedPickupPointAsync(PickupPoint pickupPoint)
+    {
+        await GetService<IGenericAttributeService>().SaveAttributeAsync(await GetCurrentCustomerAsync(),
+            NopCustomerDefaults.SelectedPickupPointAttribute, pickupPoint, await GetCurrentStoreIdAsync());
+    }
+
     public async Task SetSelectedPaymentMethodAsync(string paymentMethodSystemName)
     {
         await GetService<IGenericAttributeService>().SaveAttributeAsync(await GetCurrentCustomerAsync(),
@@ -361,7 +450,8 @@ public class CheckoutTestHelpers
     }
 
     /// <summary>
-    /// Clear the selected/offered shipping options, the selected pickup point and the selected payment method
+    /// Clear the selected/offered shipping options, the selected pickup point, the desired delivery date,
+    /// the selected payment method and the stored process payment request
     /// </summary>
     public async Task ClearCheckoutAttributesAsync()
     {
@@ -373,7 +463,27 @@ public class CheckoutTestHelpers
         await genericAttributeService.SaveAttributeAsync<List<ShippingOption>>(customer, NopCustomerDefaults.OfferedShippingOptionsAttribute, null, storeId);
         await genericAttributeService.SaveAttributeAsync<PickupPoint>(customer, NopCustomerDefaults.SelectedPickupPointAttribute, null, storeId);
         await genericAttributeService.SaveAttributeAsync<string>(customer, NopCustomerDefaults.SelectedPaymentMethodAttribute, null, storeId);
+        await genericAttributeService.SaveAttributeAsync<DateTime?>(customer, NopCustomerDefaults.DesiredDeliveryDate, null, storeId);
+        await genericAttributeService.SaveAttributeAsync<string>(customer, NopCustomerDefaults.ProcessPaymentRequestAttribute, null, storeId);
     }
+
+    /// <summary>
+    /// Read a generic attribute of the current customer in the current store through IGenericAttributeService
+    /// </summary>
+    public async Task<TPropType> GetCustomerAttributeAsync<TPropType>(string key)
+    {
+        return await GetService<IGenericAttributeService>().GetAttributeAsync<TPropType>(await GetCurrentCustomerAsync(),
+            key, await GetCurrentStoreIdAsync());
+    }
+
+    public Task<ShippingOption> GetSelectedShippingOptionAsync() =>
+        GetCustomerAttributeAsync<ShippingOption>(NopCustomerDefaults.SelectedShippingOptionAttribute);
+
+    public Task<PickupPoint> GetSelectedPickupPointAsync() =>
+        GetCustomerAttributeAsync<PickupPoint>(NopCustomerDefaults.SelectedPickupPointAttribute);
+
+    public Task<DateTime?> GetDesiredDeliveryDateAsync() =>
+        GetCustomerAttributeAsync<DateTime?>(NopCustomerDefaults.DesiredDeliveryDate);
 
     #endregion
 }
@@ -418,5 +528,31 @@ public static class CheckoutResults
         value.Should().NotBeNull();
 
         return value.GetType().GetProperties().ToDictionary(p => p.Name, p => p.GetValue(value));
+    }
+
+    /// <summary>
+    /// Assert the result is the OPC error JSON { error = 1, message } and return the message
+    /// </summary>
+    public static string JsonError(IActionResult result)
+    {
+        var json = Json(result);
+        json.Keys.Should().BeEquivalentTo("error", "message");
+        json["error"].Should().Be(1);
+
+        return json["message"].Should().BeOfType<string>().Subject;
+    }
+
+    /// <summary>
+    /// Return the name and html of the "update_section" value of a JSON result
+    /// </summary>
+    public static (string Name, string Html) UpdateSection(IDictionary<string, object> json)
+    {
+        json.Should().ContainKey("update_section");
+        var section = json["update_section"];
+        section.Should().NotBeNull();
+
+        var type = section.GetType();
+
+        return ((string)type.GetProperty("name")?.GetValue(section), (string)type.GetProperty("html")?.GetValue(section));
     }
 }
