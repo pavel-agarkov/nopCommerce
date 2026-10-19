@@ -525,15 +525,15 @@ None. There is no schema, setting, resource, route or view change. Third-party C
 
 #### Automated
 
-- [x] 2.1 All characterization tests pass against unchanged production code
-- [x] 2.2 Production code unchanged in this phase
-- [x] 2.3 Every one of the 20 guarded actions appears in at least one guard test case
-- [x] 2.4 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 2.1 All characterization tests pass against unchanged production code — 4d649f3c01
+- [x] 2.2 Production code unchanged in this phase — 4d649f3c01
+- [x] 2.3 Every one of the 20 guarded actions appears in at least one guard test case — 4d649f3c01
+- [x] 2.4 Full suite passes: `dotnet test --no-build --configuration Release src` — 4d649f3c01
 
 #### Manual
 
-- [x] 2.5 Mutation spot-check: swapping one guard exit makes a test fail
-- [x] 2.6 Mutation spot-check: removing the multi-step null save makes a shipping-method test fail
+- [x] 2.5 Mutation spot-check: swapping one guard exit makes a test fail — 4d649f3c01
+- [x] 2.6 Mutation spot-check: removing the multi-step null save makes a shipping-method test fail — 4d649f3c01
 
 ### Phase 3: Guard helper and multi-step adoption
 
