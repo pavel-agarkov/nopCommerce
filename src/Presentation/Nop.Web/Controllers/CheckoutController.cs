@@ -502,6 +502,37 @@ public partial class CheckoutController : BasePublicController
         return new ShippingMethodStepResult { Outcome = ShippingMethodStepOutcome.OptionSaved };
     }
 
+    /// <summary>
+    /// Validates the posted payment form and stores the process payment request (shared by the multi-step and one page checkout)
+    /// </summary>
+    /// <param name="form">The form</param>
+    /// <param name="customer">The customer</param>
+    /// <param name="store">The store</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the step result
+    /// </returns>
+    protected virtual async Task<PaymentInfoStepResult> SavePaymentInfoStepAsync(IFormCollection form, Customer customer, Store store)
+    {
+        //load payment method
+        var paymentMethodSystemName = await _genericAttributeService.GetAttributeAsync<string>(customer,
+            NopCustomerDefaults.SelectedPaymentMethodAttribute, store.Id);
+        var paymentMethod = await _paymentPluginManager
+            .LoadPluginBySystemNameAsync(paymentMethodSystemName, customer, store.Id);
+        if (paymentMethod == null)
+            return new PaymentInfoStepResult { Outcome = PaymentInfoStepOutcome.MethodNotSelected };
+
+        var warnings = await paymentMethod.ValidatePaymentFormAsync(form);
+        foreach (var warning in warnings)
+            ModelState.AddModelError("", warning);
+        if (!ModelState.IsValid)
+            return new PaymentInfoStepResult { Outcome = PaymentInfoStepOutcome.Invalid, PaymentMethod = paymentMethod };
+
+        await _orderProcessingService.SetProcessPaymentRequestAsync(await paymentMethod.GetPaymentInfoAsync(form));
+
+        return new PaymentInfoStepResult { Outcome = PaymentInfoStepOutcome.Saved, PaymentMethod = paymentMethod };
+    }
+
     #endregion
 
     #region Methods (common)
@@ -1259,27 +1290,16 @@ public partial class CheckoutController : BasePublicController
         if (!isPaymentWorkflowRequired)
             return RedirectToRoute(NopRouteNames.Standard.CHECKOUT_CONFIRM);
 
-        //load payment method
-        var paymentMethodSystemName = await _genericAttributeService.GetAttributeAsync<string>(customer,
-            NopCustomerDefaults.SelectedPaymentMethodAttribute, store.Id);
-        var paymentMethod = await _paymentPluginManager
-            .LoadPluginBySystemNameAsync(paymentMethodSystemName, customer, store.Id);
-        if (paymentMethod == null)
-            return RedirectToRoute(NopRouteNames.Standard.CHECKOUT_PAYMENT_METHOD);
+        var stepResult = await SavePaymentInfoStepAsync(form, customer, store);
 
-        var warnings = await paymentMethod.ValidatePaymentFormAsync(form);
-        foreach (var warning in warnings)
-            ModelState.AddModelError("", warning);
-        if (ModelState.IsValid)
+        return stepResult.Outcome switch
         {
-            await _orderProcessingService.SetProcessPaymentRequestAsync(await paymentMethod.GetPaymentInfoAsync(form));
-            return RedirectToRoute(NopRouteNames.Standard.CHECKOUT_CONFIRM);
-        }
-
-        //If we got this far, something failed, redisplay form
-        //model
-        var model = await _checkoutModelFactory.PreparePaymentInfoModelAsync(paymentMethod);
-        return View(model);
+            PaymentInfoStepOutcome.MethodNotSelected => RedirectToRoute(NopRouteNames.Standard.CHECKOUT_PAYMENT_METHOD),
+            PaymentInfoStepOutcome.Saved => RedirectToRoute(NopRouteNames.Standard.CHECKOUT_CONFIRM),
+            //If we got this far, something failed, redisplay form
+            PaymentInfoStepOutcome.Invalid => View(await _checkoutModelFactory.PreparePaymentInfoModelAsync(stepResult.PaymentMethod)),
+            _ => throw new ArgumentOutOfRangeException(nameof(stepResult), stepResult.Outcome, "Unknown payment info step outcome")
+        };
     }
 
     public virtual async Task<IActionResult> Confirm()
@@ -1888,19 +1908,16 @@ public partial class CheckoutController : BasePublicController
             var store = guardResult.Store;
             var cart = guardResult.Cart;
 
-            var paymentMethodSystemName = await _genericAttributeService.GetAttributeAsync<string>(customer,
-                NopCustomerDefaults.SelectedPaymentMethodAttribute, store.Id);
-            var paymentMethod = await _paymentPluginManager
-                                    .LoadPluginBySystemNameAsync(paymentMethodSystemName, customer, store.Id)
-                                ?? throw new Exception("Payment method is not selected");
+            var stepResult = await SavePaymentInfoStepAsync(form, customer, store);
 
-            var warnings = await paymentMethod.ValidatePaymentFormAsync(form);
-            foreach (var warning in warnings)
-                ModelState.AddModelError("", warning);
-            if (ModelState.IsValid)
+            switch (stepResult.Outcome)
             {
-                await _orderProcessingService.SetProcessPaymentRequestAsync(await paymentMethod.GetPaymentInfoAsync(form));
+                case PaymentInfoStepOutcome.MethodNotSelected:
+                    throw new Exception("Payment method is not selected");
+            }
 
+            if (stepResult.Outcome == PaymentInfoStepOutcome.Saved)
+            {
                 var confirmOrderModel = await _checkoutModelFactory.PrepareConfirmOrderModelAsync(cart);
                 return Json(new
                 {
@@ -1914,7 +1931,7 @@ public partial class CheckoutController : BasePublicController
             }
 
             //If we got this far, something failed, redisplay form
-            var paymentInfoModel = await _checkoutModelFactory.PreparePaymentInfoModelAsync(paymentMethod);
+            var paymentInfoModel = await _checkoutModelFactory.PreparePaymentInfoModelAsync(stepResult.PaymentMethod);
             return Json(new
             {
                 update_section = new UpdateSectionJsonModel
@@ -2212,6 +2229,43 @@ public partial class CheckoutController : BasePublicController
         /// Gets or sets the step outcome
         /// </summary>
         public ShippingMethodStepOutcome Outcome { get; set; }
+    }
+
+    /// <summary>
+    /// Represents the outcome of the shared payment info step
+    /// </summary>
+    public enum PaymentInfoStepOutcome
+    {
+        /// <summary>
+        /// The selected payment method could not be loaded
+        /// </summary>
+        MethodNotSelected,
+
+        /// <summary>
+        /// The posted payment form has warnings (added to the model state)
+        /// </summary>
+        Invalid,
+
+        /// <summary>
+        /// The process payment request was stored
+        /// </summary>
+        Saved
+    }
+
+    /// <summary>
+    /// Represents the result of the shared payment info step
+    /// </summary>
+    public partial class PaymentInfoStepResult
+    {
+        /// <summary>
+        /// Gets or sets the step outcome
+        /// </summary>
+        public PaymentInfoStepOutcome Outcome { get; set; }
+
+        /// <summary>
+        /// Gets or sets the loaded payment method (null when no payment method is selected)
+        /// </summary>
+        public IPaymentMethod PaymentMethod { get; set; }
     }
 
     #endregion

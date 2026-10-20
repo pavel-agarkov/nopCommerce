@@ -566,26 +566,26 @@ None. There is no schema, setting, resource, route or view change. Third-party C
 
 #### Automated
 
-- [x] 5.1 Characterization suite passes unedited
-- [x] 5.2 Test files unchanged since Phase 2
-- [x] 5.3 Shared shipping logic exists once
-- [x] 5.4 No existing CC member signature changed
-- [x] 5.5 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 5.1 Characterization suite passes unedited — 9e3da753be
+- [x] 5.2 Test files unchanged since Phase 2 — 9e3da753be
+- [x] 5.3 Shared shipping logic exists once — 9e3da753be
+- [x] 5.4 No existing CC member signature changed — 9e3da753be
+- [x] 5.5 Full suite passes: `dotnet test --no-build --configuration Release src` — 9e3da753be
 
 #### Manual
 
-- [x] 5.6 Storefront: shipping method and pickup in both flows
+- [x] 5.6 Storefront: shipping method and pickup in both flows — 9e3da753be
 
 ### Phase 6: Payment-info shared step core
 
 #### Automated
 
-- [ ] 6.1 Characterization suite passes unedited
-- [ ] 6.2 Test files unchanged since Phase 2
-- [ ] 6.3 Shared payment-info logic exists once
-- [ ] 6.4 No existing CC member signature changed
-- [ ] 6.5 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 6.1 Characterization suite passes unedited
+- [x] 6.2 Test files unchanged since Phase 2
+- [x] 6.3 Shared payment-info logic exists once
+- [x] 6.4 No existing CC member signature changed
+- [x] 6.5 Full suite passes: `dotnet test --no-build --configuration Release src`
 
 #### Manual
 
-- [ ] 6.6 Storefront: payment info with Check/Money Order in both flows
+- [x] 6.6 Storefront: payment info with Check/Money Order in both flows
