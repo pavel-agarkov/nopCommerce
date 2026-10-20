@@ -73,7 +73,9 @@ public abstract class CheckoutControllerTestBase : ServiceTest
     static CheckoutControllerTestBase()
     {
         //register the type converters the application registers at startup (BaseNopTest registers only the list ones);
-        //checkout stores ShippingOption, List<ShippingOption> and PickupPoint values in generic attributes through them
+        //checkout stores ShippingOption, List<ShippingOption> and PickupPoint values in generic attributes through them;
+        //the registration is process-wide and never undone, so fixtures that run after any checkout fixture see these
+        //converters too (harmless, it matches production startup, but results of such fixtures may depend on run order)
         new TypeConverterRegistrationStartUpTask().Execute();
     }
 

@@ -99,7 +99,7 @@ Verification: the characterization suite is green at the Phase 2 commit, and gre
    - Adopt it in the OPC actions (Phase 4).
    - Extract the shipping-method step core (Phase 5), then the payment-info step core (Phase 6).
 3. **How the flows share code.** Each new piece of shared logic returns an **outcome value**. Each action maps that outcome to its existing exit (redirect, `Challenge`, view, JSON, or `throw` inside the existing OPC `try`). This is the `EditAddressAsync` precedent turned into a result object instead of a callback. Because the OPC actions still throw the same `Exception` inside their existing `try`, warning logging and the `{ error = 1, message }` JSON are preserved without duplicating the catch.
-4. **Additive, contract-safe types.** New members are `protected virtual` (nopCommerce convention). New outcome types are `public`, so overriding subclasses can use them. Nothing existing is removed or re-signed.
+4. **Additive, contract-safe types.** New members are `protected virtual` (nopCommerce convention). New outcome types are `public`, so overriding subclasses can use them. Nothing existing is removed or re-signed. *(Amended after implementation review F3: the nested types are now `protected`. See Addenda.)*
 
 ## Critical Implementation Details
 
@@ -494,6 +494,13 @@ None expected. The guard helper performs the same calls in the same order, and `
 ## Migration Notes
 
 None. There is no schema, setting, resource, route or view change. Third-party CC subclasses keep compiling and behaving identically, because no existing member is removed or re-signed; new members are additive.
+
+## Addenda (post-implementation review)
+
+- **F3: nested types are `protected`, not `public`.** `CheckoutFlow`, `CheckoutGuardOutcome`, `CheckoutGuardResult`, `ShippingMethodStepOutcome`, `ShippingMethodStepResult`, `PaymentInfoStepOutcome` and `PaymentInfoStepResult` are `protected`, following the `protected partial class PlaceOrderContainer` precedent (OrderProcessingService). Subclasses can still use them in `protected virtual` overrides, and Nop.Web gains no public API surface. Nothing outside CheckoutController and its subclasses refers to them, the tests included.
+- **F1: guard-order check.** `checks/cc-guard-order.sh` (rule `checks/cc-guard-order.yml`) asserts that `ValidateCheckoutAccessAsync` checks `CheckoutDisabled` before it loads the customer. The DI harness runs as an authenticated admin, so no test can observe guest creation.
+- **F4a: the harness uses a per-controller provider, not `ActivatorUtilities.CreateInstance(ServiceProvider)`.** Resolving CC's deep all-transient graph repeatedly from the shared provider switches the container to compiled resolvers, which overflow the test worker stack in this fixture and in later ones. `CheckoutControllerTestBase` builds a fresh provider for each controller. That provider forwards singleton and scoped services to the shared one, so tests still arrange state on the same instances. The full rationale is in the `CreateControllerServiceProvider` remarks.
+- **F4b: no new test `IPickupPointProvider`.** The Phase 2 pickup tests use the existing `PickupPoint.TestProvider` (points "1"–"3"). Point "99" drives the "pickup point not allowed" branch, so no new test provider was needed.
 
 ## References
 

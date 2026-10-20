@@ -47,7 +47,7 @@
   - Tradeoff: It checks the code's shape, not its behaviour. It misses the same problem if it comes back through an override or a renamed helper, and it does not run in CI.
   - Confidence: HIGH — ast-grep is already used in checks/.
   - Blind spot: Writing order-sensitive ast-grep rules is awkward (`follows`/`precedes`).
-- **Decision**: PENDING
+- **Decision**: FIXED (Fix B) — added `checks/cc-guard-order.yml` + `checks/cc-guard-order.sh`. Passes on current code; mutation-tested: hoisted load, nested load and an extra early load each fail (exit 1); a removed `CheckoutDisabled` check fails the anchor (exit 2).
 
 ### F2 — `ThrowIfCheckoutGuardFailedAsync` fails open on an unknown outcome
 
@@ -57,7 +57,7 @@
 - **Location**: src/Presentation/Nop.Web/Controllers/CheckoutController.cs:419-429
 - **Detail**: The `switch` has no `default`, so any outcome other than the four failures is treated as "passed". Its multi-step sibling `GetCheckoutGuardFailureResult` (:406) throws `ArgumentOutOfRangeException` on an unexpected value. If a subclass overrides `ValidateCheckoutAccessAsync` and returns an outcome outside these cases, the OPC actions continue past the guard, possibly with a null `Cart`/`Customer`. It can't be reached today.
 - **Fix**: Add `default: if (!result.Passed) throw new ArgumentOutOfRangeException(nameof(result), result.Outcome, ...); break;` (or keep `Passed` as an explicit no-op case and throw on everything else), so it behaves like `GetCheckoutGuardFailureResult`.
-- **Decision**: PENDING
+- **Decision**: FIXED — added explicit `case Passed: break;` and `default: throw new ArgumentOutOfRangeException(...)`.
 
 ### F3 — The new nested types are `public`, which widens Nop.Web's public API
 
@@ -76,7 +76,7 @@
   - Tradeoff: Nop.Web gains permanent public surface area.
   - Confidence: HIGH.
   - Blind spot: None significant.
-- **Decision**: PENDING
+- **Decision**: FIXED (Fix A) — all 7 nested types are now `protected`. No test or public member refers to them, so the test files were not touched. The plan's §4 is annotated and the reason is recorded under "Addenda".
 
 ### F4 — Two harness deviations are explained in code but not recorded in the plan
 
@@ -86,7 +86,7 @@
 - **Location**: src/Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/CheckoutControllerTestBase.cs:154-223; ShippingMethodStepTests.cs:19-20
 - **Detail**: (a) The plan said to build the controller with `ActivatorUtilities.CreateInstance(ServiceProvider)`. The code instead builds a per-controller provider that resolves from the shared one; the remarks say this avoids a stack overflow. (b) The plan asked for a new test-only `IPickupPointProvider` returning one point. The tests use the existing `PickupPoint.TestProvider` (points 1-3), and point "99" triggers the "not allowed" branch. Both choices are sound and documented in code, but the plan, which is the source of truth, does not mention them.
 - **Fix**: Add a short "Implementation notes / accepted deviations" addendum to plan.md for (a) and (b).
-- **Decision**: PENDING
+- **Decision**: FIXED — recorded as F4a/F4b under plan.md "Addenda (post-implementation review)".
 
 ### F5 — The storefront manual checks have no recorded evidence
 
@@ -96,7 +96,7 @@
 - **Location**: context/changes/refactor-opportunities/plan.md:549, :563, :577, :591 (and 2.5/2.6 at :535-536)
 - **Detail**: Manual items 3.5, 4.6, 5.6 and 6.6 (storefront walks) and 2.5/2.6 (mutation spot-checks) are marked `[x]` with the phase commit SHA, but nothing records what was observed. They can't be checked from the diff. The DI harness has no routing, filters or views (Phase 1 known gaps), so these manual walks are the only coverage for antiforgery, captcha and views.
 - **Fix**: Confirm that the walks were actually done, and add a one-line observation per item in Progress (e.g. "guest OPC with Check/Money Order → completed page; anon-disallowed → error shown").
-- **Decision**: PENDING
+- **Decision**: SKIPPED
 
 ### F6 — The static TypeConverter registration in the test base leaks across fixtures
 
@@ -106,7 +106,7 @@
 - **Location**: src/Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/CheckoutControllerTestBase.cs:73-78
 - **Detail**: The static constructor runs `TypeConverterRegistrationStartUpTask` once per process and never undoes it. Fixtures that run after a checkout fixture get the converters, and fixtures that run before do not, so results depend on run order. It is harmless today, because the registration matches production startup.
 - **Fix**: Document this in the class remarks, or move the registration into `BaseNopTest` so every fixture sees the same state.
-- **Decision**: PENDING
+- **Decision**: FIXED — documented in the static constructor comment (process-wide, never undone, results may depend on run order). The test code is unchanged.
 
 ### F7 — The signature check skips the constructor and attributes and reads the working tree
 
@@ -116,7 +116,7 @@
 - **Location**: context/changes/refactor-opportunities/checks/cc-virtual-signatures.sh:58; checks/cc-virtual-members.yml
 - **Detail**: The rule covers virtual methods and properties only. The "constructor unchanged" constraint and attribute preservation (`[IgnoreAntiforgeryToken]`, `[ValidateCaptcha]`, `[FormValueRequired]`, which the DI harness can't exercise) are not checked; the script strips attributes at :58. It also compares against the working tree rather than `HEAD`. I checked the diff by hand: no constructor or attribute lines changed.
 - **Fix**: Add a `constructor_declaration` rule (exact match) and an attribute-preserving comparison for action methods. Alternatively, document in the script header that these are checked separately.
-- **Decision**: PENDING
+- **Decision**: FIXED — `cc-virtual-signatures.sh` now also compares virtual declarations with their attributes kept and the constructor declaration exactly; the working-tree-vs-HEAD behaviour is documented in the header. Passes against 4d649f3c01; mutation-tested: a dropped `[ValidateCaptcha]` and a renamed constructor parameter each fail (exit 1).
 
 ### F8 — The reflection coverage test only checks one direction
 
@@ -126,4 +126,10 @@
 - **Location**: src/Tests/Nop.Tests/Nop.Web.Tests/Public/Controllers/Checkout/CheckoutGuardTests.cs:261-297
 - **Detail**: The test verifies that each of the 20 expected actions exists and has guard cases. It does not flag a new action that calls `ValidateCheckoutAccessAsync` but is missing from the list. The plan's wording ("against an explicit expected list of 20") allows this reading.
 - **Fix**: Optionally add an ast-grep check in `checks/` that the number of `ValidateCheckoutAccessAsync(` call sites in CC equals the expected list (today 20).
-- **Decision**: PENDING
+- **Decision**: FIXED — added `checks/cc-guard-coverage.sh`, which compares, both ways, the set of CC methods calling `ValidateCheckoutAccessAsync` (via ast-grep) with the `_expectedGuardedActions` list read from the test file. That is sturdier than a fixed count. Passes (20 = 20); mutation-tested both directions (exit 1).
+
+## Triage summary (2026-10-20)
+
+- Fixed: F1 (Fix B), F2, F3 (Fix A), F4, F6, F7, F8
+- Skipped: F5
+- Verification after fixes: `dotnet build -c Release` of Nop.Tests (includes Nop.Web): 0 errors, 0 warnings. Checkout-filtered tests: 195/195 passed on the fresh build. `cc-guard-order.sh`, `cc-guard-coverage.sh` and `cc-virtual-signatures.sh 4d649f3c01`: all OK.

@@ -1,0 +1,36 @@
+# Review finding F1: inside ValidateCheckoutAccessAsync, the `CheckoutDisabled` check must run
+# before the current customer is loaded (on a first visit GetCurrentCustomerAsync can create and
+# persist a guest). Matches every top-level statement of the method body that loads the customer
+# without following the `if (_orderSettings.CheckoutDisabled)` statement; any match is a violation.
+# Used by cc-guard-order.sh.
+id: cc-guard-order
+language: csharp
+severity: warning
+message: GetCurrentCustomerAsync runs before the CheckoutDisabled check in ValidateCheckoutAccessAsync
+rule:
+  any:
+    - kind: expression_statement
+    - kind: local_declaration_statement
+    - kind: if_statement
+    - kind: return_statement
+    - kind: try_statement
+    - kind: using_statement
+    - kind: foreach_statement
+    - kind: block
+  has:
+    pattern: _workContext.GetCurrentCustomerAsync()
+    stopBy: end
+  inside:
+    kind: block
+    inside:
+      kind: method_declaration
+      has:
+        field: name
+        regex: ^ValidateCheckoutAccessAsync$
+  not:
+    follows:
+      kind: if_statement
+      has:
+        field: condition
+        pattern: _orderSettings.CheckoutDisabled
+      stopBy: end

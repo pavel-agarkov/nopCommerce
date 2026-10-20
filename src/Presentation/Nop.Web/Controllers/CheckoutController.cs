@@ -426,6 +426,10 @@ public partial class CheckoutController : BasePublicController
                 throw new Exception("One page checkout is disabled");
             case CheckoutGuardOutcome.GuestNotAllowed:
                 throw new Exception("Anonymous checkout is not allowed");
+            case CheckoutGuardOutcome.Passed:
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(result), result.Outcome, "Unknown checkout guard outcome");
         }
     }
 
@@ -2114,7 +2118,7 @@ public partial class CheckoutController : BasePublicController
     /// <summary>
     /// Represents the checkout flow the access guard validates against
     /// </summary>
-    public enum CheckoutFlow
+    protected enum CheckoutFlow
     {
         /// <summary>
         /// No flow mode or guest check (used by the checkout entry point)
@@ -2135,7 +2139,7 @@ public partial class CheckoutController : BasePublicController
     /// <summary>
     /// Represents the outcome of the checkout access guard
     /// </summary>
-    public enum CheckoutGuardOutcome
+    protected enum CheckoutGuardOutcome
     {
         /// <summary>
         /// All checks passed
@@ -2166,7 +2170,7 @@ public partial class CheckoutController : BasePublicController
     /// <summary>
     /// Represents the result of the checkout access guard
     /// </summary>
-    public partial class CheckoutGuardResult
+    protected partial class CheckoutGuardResult
     {
         /// <summary>
         /// Gets or sets the guard outcome
@@ -2197,7 +2201,7 @@ public partial class CheckoutController : BasePublicController
     /// <summary>
     /// Represents the outcome of the shared shipping method step
     /// </summary>
-    public enum ShippingMethodStepOutcome
+    protected enum ShippingMethodStepOutcome
     {
         /// <summary>
         /// The pickup option was saved
@@ -2223,7 +2227,7 @@ public partial class CheckoutController : BasePublicController
     /// <summary>
     /// Represents the result of the shared shipping method step
     /// </summary>
-    public partial class ShippingMethodStepResult
+    protected partial class ShippingMethodStepResult
     {
         /// <summary>
         /// Gets or sets the step outcome
@@ -2234,7 +2238,7 @@ public partial class CheckoutController : BasePublicController
     /// <summary>
     /// Represents the outcome of the shared payment info step
     /// </summary>
-    public enum PaymentInfoStepOutcome
+    protected enum PaymentInfoStepOutcome
     {
         /// <summary>
         /// The selected payment method could not be loaded
@@ -2255,7 +2259,7 @@ public partial class CheckoutController : BasePublicController
     /// <summary>
     /// Represents the result of the shared payment info step
     /// </summary>
-    public partial class PaymentInfoStepResult
+    protected partial class PaymentInfoStepResult
     {
         /// <summary>
         /// Gets or sets the step outcome
@@ -2269,4 +2273,4 @@ public partial class CheckoutController : BasePublicController
     }
 
     #endregion
-}
+}
