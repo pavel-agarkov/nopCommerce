@@ -407,6 +407,28 @@ public partial class CheckoutController : BasePublicController
         };
     }
 
+    /// <summary>
+    /// Throws an exception for a failed checkout access guard (used by one page checkout AJAX actions)
+    /// </summary>
+    /// <param name="result">The guard result</param>
+    /// <returns>A task that represents the asynchronous operation</returns>
+    protected virtual async Task ThrowIfCheckoutGuardFailedAsync(CheckoutGuardResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        switch (result.Outcome)
+        {
+            case CheckoutGuardOutcome.CheckoutDisabled:
+                throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
+            case CheckoutGuardOutcome.CartEmpty:
+                throw new Exception("Your cart is empty");
+            case CheckoutGuardOutcome.WrongFlow:
+                throw new Exception("One page checkout is disabled");
+            case CheckoutGuardOutcome.GuestNotAllowed:
+                throw new Exception("Anonymous checkout is not allowed");
+        }
+    }
+
     #endregion
 
     #region Methods (common)
@@ -1463,21 +1485,11 @@ public partial class CheckoutController : BasePublicController
     public virtual async Task<IActionResult> OnePageCheckout()
     {
         //validation
-        if (_orderSettings.CheckoutDisabled)
-            return RedirectToRoute(NopRouteNames.General.CART);
+        var guardResult = await ValidateCheckoutAccessAsync(CheckoutFlow.OnePage);
+        if (!guardResult.Passed)
+            return GetCheckoutGuardFailureResult(guardResult, CheckoutFlow.OnePage);
 
-        var customer = await _workContext.GetCurrentCustomerAsync();
-        var store = await _storeContext.GetCurrentStoreAsync();
-        var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
-
-        if (!cart.Any())
-            return RedirectToRoute(NopRouteNames.General.CART);
-
-        if (!_orderSettings.OnePageCheckoutEnabled)
-            return RedirectToRoute(NopRouteNames.Standard.CHECKOUT);
-
-        if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
-            return Challenge();
+        var cart = guardResult.Cart;
 
         var model = await _checkoutModelFactory.PrepareOnePageCheckoutModelAsync(cart);
         return View(model);
@@ -1489,21 +1501,12 @@ public partial class CheckoutController : BasePublicController
         try
         {
             //validation
-            if (_orderSettings.CheckoutDisabled)
-                throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
+            var guardResult = await ValidateCheckoutAccessAsync(CheckoutFlow.OnePage);
+            await ThrowIfCheckoutGuardFailedAsync(guardResult);
 
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var store = await _storeContext.GetCurrentStoreAsync();
-            var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
-
-            if (!cart.Any())
-                throw new Exception("Your cart is empty");
-
-            if (!_orderSettings.OnePageCheckoutEnabled)
-                throw new Exception("One page checkout is disabled");
-
-            if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
-                throw new Exception("Anonymous checkout is not allowed");
+            var customer = guardResult.Customer;
+            var store = guardResult.Store;
+            var cart = guardResult.Cart;
 
             _ = int.TryParse(form["billing_address_id"], out var billingAddressId);
 
@@ -1643,21 +1646,12 @@ public partial class CheckoutController : BasePublicController
         try
         {
             //validation
-            if (_orderSettings.CheckoutDisabled)
-                throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
+            var guardResult = await ValidateCheckoutAccessAsync(CheckoutFlow.OnePage);
+            await ThrowIfCheckoutGuardFailedAsync(guardResult);
 
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var store = await _storeContext.GetCurrentStoreAsync();
-            var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
-
-            if (!cart.Any())
-                throw new Exception("Your cart is empty");
-
-            if (!_orderSettings.OnePageCheckoutEnabled)
-                throw new Exception("One page checkout is disabled");
-
-            if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
-                throw new Exception("Anonymous checkout is not allowed");
+            var customer = guardResult.Customer;
+            var store = guardResult.Store;
+            var cart = guardResult.Cart;
 
             if (!await _shoppingCartService.ShoppingCartRequiresShippingAsync(cart))
                 throw new Exception("Shipping is not required");
@@ -1762,21 +1756,12 @@ public partial class CheckoutController : BasePublicController
         try
         {
             //validation
-            if (_orderSettings.CheckoutDisabled)
-                throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
+            var guardResult = await ValidateCheckoutAccessAsync(CheckoutFlow.OnePage);
+            await ThrowIfCheckoutGuardFailedAsync(guardResult);
 
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var store = await _storeContext.GetCurrentStoreAsync();
-            var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
-
-            if (!cart.Any())
-                throw new Exception("Your cart is empty");
-
-            if (!_orderSettings.OnePageCheckoutEnabled)
-                throw new Exception("One page checkout is disabled");
-
-            if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
-                throw new Exception("Anonymous checkout is not allowed");
+            var customer = guardResult.Customer;
+            var store = guardResult.Store;
+            var cart = guardResult.Cart;
 
             if (!await _shoppingCartService.ShoppingCartRequiresShippingAsync(cart))
                 throw new Exception("Shipping is not required");
@@ -1850,21 +1835,12 @@ public partial class CheckoutController : BasePublicController
         try
         {
             //validation
-            if (_orderSettings.CheckoutDisabled)
-                throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
+            var guardResult = await ValidateCheckoutAccessAsync(CheckoutFlow.OnePage);
+            await ThrowIfCheckoutGuardFailedAsync(guardResult);
 
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var store = await _storeContext.GetCurrentStoreAsync();
-            var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
-
-            if (!cart.Any())
-                throw new Exception("Your cart is empty");
-
-            if (!_orderSettings.OnePageCheckoutEnabled)
-                throw new Exception("One page checkout is disabled");
-
-            if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
-                throw new Exception("Anonymous checkout is not allowed");
+            var customer = guardResult.Customer;
+            var store = guardResult.Store;
+            var cart = guardResult.Cart;
 
             //payment method 
             if (string.IsNullOrEmpty(paymentmethod))
@@ -1923,21 +1899,12 @@ public partial class CheckoutController : BasePublicController
         try
         {
             //validation
-            if (_orderSettings.CheckoutDisabled)
-                throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
+            var guardResult = await ValidateCheckoutAccessAsync(CheckoutFlow.OnePage);
+            await ThrowIfCheckoutGuardFailedAsync(guardResult);
 
-            var customer = await _workContext.GetCurrentCustomerAsync();
-            var store = await _storeContext.GetCurrentStoreAsync();
-            var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
-
-            if (!cart.Any())
-                throw new Exception("Your cart is empty");
-
-            if (!_orderSettings.OnePageCheckoutEnabled)
-                throw new Exception("One page checkout is disabled");
-
-            if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
-                throw new Exception("Anonymous checkout is not allowed");
+            var customer = guardResult.Customer;
+            var store = guardResult.Store;
+            var cart = guardResult.Cart;
 
             var paymentMethodSystemName = await _genericAttributeService.GetAttributeAsync<string>(customer,
                 NopCustomerDefaults.SelectedPaymentMethodAttribute, store.Id);
@@ -2002,20 +1969,11 @@ public partial class CheckoutController : BasePublicController
             if (!isCaptchaSettingEnabled || (isCaptchaSettingEnabled && captchaValid))
             {
                 //validation
-                if (_orderSettings.CheckoutDisabled)
-                    throw new Exception(await _localizationService.GetResourceAsync("Checkout.Disabled"));
+                var guardResult = await ValidateCheckoutAccessAsync(CheckoutFlow.OnePage);
+                await ThrowIfCheckoutGuardFailedAsync(guardResult);
 
-                var store = await _storeContext.GetCurrentStoreAsync();
-                var cart = await _shoppingCartService.GetShoppingCartAsync(customer, ShoppingCartType.ShoppingCart, store.Id);
-
-                if (!cart.Any())
-                    throw new Exception("Your cart is empty");
-
-                if (!_orderSettings.OnePageCheckoutEnabled)
-                    throw new Exception("One page checkout is disabled");
-
-                if (await _customerService.IsGuestAsync(customer) && !_orderSettings.AnonymousCheckoutAllowed)
-                    throw new Exception("Anonymous checkout is not allowed");
+                var store = guardResult.Store;
+                var cart = guardResult.Cart;
 
                 //prevent 2 orders being placed within an X seconds time frame
                 if (!await IsMinimumOrderPlacementIntervalValidAsync(customer))

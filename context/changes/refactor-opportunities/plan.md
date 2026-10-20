@@ -539,28 +539,28 @@ None. There is no schema, setting, resource, route or view change. Third-party C
 
 #### Automated
 
-- [x] 3.1 Characterization suite passes unedited
-- [x] 3.2 Test files unchanged since Phase 2
-- [x] 3.3 No existing CC member signature changed
-- [x] 3.4 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 3.1 Characterization suite passes unedited — dac132ef86
+- [x] 3.2 Test files unchanged since Phase 2 — dac132ef86
+- [x] 3.3 No existing CC member signature changed — dac132ef86
+- [x] 3.4 Full suite passes: `dotnet test --no-build --configuration Release src` — dac132ef86
 
 #### Manual
 
-- [x] 3.5 Storefront smoke test with OPC disabled (multi-step walk + login challenge)
+- [x] 3.5 Storefront smoke test with OPC disabled (multi-step walk + login challenge) — dac132ef86
 
 ### Phase 4: Guard adoption in OPC actions
 
 #### Automated
 
-- [ ] 4.1 Characterization suite passes unedited
-- [ ] 4.2 Test files unchanged since Phase 2
-- [ ] 4.3 No inlined guard copies remain
-- [ ] 4.4 No existing CC member signature changed
-- [ ] 4.5 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 4.1 Characterization suite passes unedited
+- [x] 4.2 Test files unchanged since Phase 2
+- [x] 4.3 No inlined guard copies remain
+- [x] 4.4 No existing CC member signature changed
+- [x] 4.5 Full suite passes: `dotnet test --no-build --configuration Release src`
 
 #### Manual
 
-- [ ] 4.6 Storefront smoke test with OPC enabled (guest checkout + anonymous-disallowed error)
+- [x] 4.6 Storefront smoke test with OPC enabled (guest checkout + anonymous-disallowed error)
 
 ### Phase 5: Shipping-method shared step core
 
