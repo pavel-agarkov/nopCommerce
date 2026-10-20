@@ -429,6 +429,79 @@ public partial class CheckoutController : BasePublicController
         }
     }
 
+    /// <summary>
+    /// Saves the shipping method selected by the customer (shared by the multi-step and one page checkout)
+    /// </summary>
+    /// <param name="shippingoption">The selected shipping option</param>
+    /// <param name="form">The form</param>
+    /// <param name="customer">The customer</param>
+    /// <param name="store">The store</param>
+    /// <param name="cart">Shopping cart</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the step result
+    /// </returns>
+    protected virtual async Task<ShippingMethodStepResult> SaveShippingMethodStepAsync(string shippingoption, IFormCollection form,
+        Customer customer, Store store, IList<ShoppingCartItem> cart)
+    {
+        //pickup point
+        if (_shippingSettings.AllowPickupInStore && _orderSettings.DisplayPickupInStoreOnShippingMethodPage)
+        {
+            var pickupInStore = ParsePickupInStore(form);
+            if (pickupInStore)
+            {
+                var pickupOption = await ParsePickupOptionAsync(cart, form);
+                await SavePickupOptionAsync(pickupOption);
+
+                return new ShippingMethodStepResult { Outcome = ShippingMethodStepOutcome.PickupSaved };
+            }
+
+            //set value indicating that "pick up in store" option has not been chosen
+            await _genericAttributeService.SaveAttributeAsync<PickupPoint>(customer, NopCustomerDefaults.SelectedPickupPointAttribute, null, store.Id);
+        }
+
+        //parse selected method
+        if (string.IsNullOrEmpty(shippingoption))
+            return new ShippingMethodStepResult { Outcome = ShippingMethodStepOutcome.OptionNotParsed };
+        var splittedOption = shippingoption.Split(_separator, StringSplitOptions.RemoveEmptyEntries);
+        if (splittedOption.Length != 2)
+            return new ShippingMethodStepResult { Outcome = ShippingMethodStepOutcome.OptionNotParsed };
+        var selectedName = splittedOption[0];
+        var shippingRateComputationMethodSystemName = splittedOption[1];
+
+        //find it
+        //performance optimization. try cache first
+        var shippingOptions = await _genericAttributeService.GetAttributeAsync<List<ShippingOption>>(customer,
+            NopCustomerDefaults.OfferedShippingOptionsAttribute, store.Id);
+        if (shippingOptions == null || !shippingOptions.Any())
+        {
+            //not found? let's load them using shipping service
+            shippingOptions = (await _shippingService.GetShippingOptionsAsync(cart, await _customerService.GetCustomerShippingAddressAsync(customer),
+                customer, shippingRateComputationMethodSystemName, store.Id)).ShippingOptions.ToList();
+        }
+        else
+        {
+            //loaded cached results. let's filter result by a chosen shipping rate computation method
+            shippingOptions = shippingOptions.Where(so => so.ShippingRateComputationMethodSystemName.Equals(shippingRateComputationMethodSystemName, StringComparison.InvariantCultureIgnoreCase))
+                .ToList();
+        }
+
+        var shippingOption = shippingOptions
+            .Find(so => !string.IsNullOrEmpty(so.Name) && so.Name.Equals(selectedName, StringComparison.InvariantCultureIgnoreCase));
+        if (shippingOption == null)
+            return new ShippingMethodStepResult { Outcome = ShippingMethodStepOutcome.OptionNotFound };
+
+        //parse DesiredDeliveryDate
+        var desiredDeliveryDate = await ParseSelectedShippingMethodDeliveryDateAsync(shippingOption, shippingOptions, form);
+        if (desiredDeliveryDate != null)
+            await _genericAttributeService.SaveAttributeAsync(customer, NopCustomerDefaults.DesiredDeliveryDate, desiredDeliveryDate, store.Id);
+
+        //save
+        await _genericAttributeService.SaveAttributeAsync(customer, NopCustomerDefaults.SelectedShippingOptionAttribute, shippingOption, store.Id);
+
+        return new ShippingMethodStepResult { Outcome = ShippingMethodStepOutcome.OptionSaved };
+    }
+
     #endregion
 
     #region Methods (common)
@@ -1031,62 +1104,14 @@ public partial class CheckoutController : BasePublicController
             return RedirectToRoute(NopRouteNames.Standard.CHECKOUT_PAYMENT_METHOD);
         }
 
-        //pickup point
-        if (_shippingSettings.AllowPickupInStore && _orderSettings.DisplayPickupInStoreOnShippingMethodPage)
+        var stepResult = await SaveShippingMethodStepAsync(shippingoption, form, customer, store, cart);
+
+        return stepResult.Outcome switch
         {
-            var pickupInStore = ParsePickupInStore(form);
-            if (pickupInStore)
-            {
-                var pickupOption = await ParsePickupOptionAsync(cart, form);
-                await SavePickupOptionAsync(pickupOption);
-
-                return RedirectToRoute(NopRouteNames.Standard.CHECKOUT_PAYMENT_METHOD);
-            }
-
-            //set value indicating that "pick up in store" option has not been chosen
-            await _genericAttributeService.SaveAttributeAsync<PickupPoint>(customer, NopCustomerDefaults.SelectedPickupPointAttribute, null, store.Id);
-        }
-
-        //parse selected method 
-        if (string.IsNullOrEmpty(shippingoption))
-            return await ShippingMethod();
-        var splittedOption = shippingoption.Split(_separator, StringSplitOptions.RemoveEmptyEntries);
-        if (splittedOption.Length != 2)
-            return await ShippingMethod();
-        var selectedName = splittedOption[0];
-        var shippingRateComputationMethodSystemName = splittedOption[1];
-
-        //find it
-        //performance optimization. try cache first
-        var shippingOptions = await _genericAttributeService.GetAttributeAsync<List<ShippingOption>>(customer,
-            NopCustomerDefaults.OfferedShippingOptionsAttribute, store.Id);
-        if (shippingOptions == null || !shippingOptions.Any())
-        {
-            //not found? let's load them using shipping service
-            shippingOptions = (await _shippingService.GetShippingOptionsAsync(cart, await _customerService.GetCustomerShippingAddressAsync(customer),
-                customer, shippingRateComputationMethodSystemName, store.Id)).ShippingOptions.ToList();
-        }
-        else
-        {
-            //loaded cached results. let's filter result by a chosen shipping rate computation method
-            shippingOptions = shippingOptions.Where(so => so.ShippingRateComputationMethodSystemName.Equals(shippingRateComputationMethodSystemName, StringComparison.InvariantCultureIgnoreCase))
-                .ToList();
-        }
-
-        var shippingOption = shippingOptions
-            .Find(so => !string.IsNullOrEmpty(so.Name) && so.Name.Equals(selectedName, StringComparison.InvariantCultureIgnoreCase));
-        if (shippingOption == null)
-            return await ShippingMethod();
-
-        //parse DesiredDeliveryDate
-        var desiredDeliveryDate = await ParseSelectedShippingMethodDeliveryDateAsync(shippingOption, shippingOptions, form);
-        if (desiredDeliveryDate != null)
-            await _genericAttributeService.SaveAttributeAsync(customer, NopCustomerDefaults.DesiredDeliveryDate, desiredDeliveryDate, store.Id);
-
-        //save
-        await _genericAttributeService.SaveAttributeAsync(customer, NopCustomerDefaults.SelectedShippingOptionAttribute, shippingOption, store.Id);
-
-        return RedirectToRoute(NopRouteNames.Standard.CHECKOUT_PAYMENT_METHOD);
+            ShippingMethodStepOutcome.PickupSaved or ShippingMethodStepOutcome.OptionSaved => RedirectToRoute(NopRouteNames.Standard.CHECKOUT_PAYMENT_METHOD),
+            ShippingMethodStepOutcome.OptionNotParsed or ShippingMethodStepOutcome.OptionNotFound => await ShippingMethod(),
+            _ => throw new ArgumentOutOfRangeException(nameof(stepResult), stepResult.Outcome, "Unknown shipping method step outcome")
+        };
     }
 
     public virtual async Task<IActionResult> PaymentMethod()
@@ -1766,58 +1791,15 @@ public partial class CheckoutController : BasePublicController
             if (!await _shoppingCartService.ShoppingCartRequiresShippingAsync(cart))
                 throw new Exception("Shipping is not required");
 
-            //pickup point
-            if (_shippingSettings.AllowPickupInStore && _orderSettings.DisplayPickupInStoreOnShippingMethodPage)
+            var stepResult = await SaveShippingMethodStepAsync(shippingoption, form, customer, store, cart);
+
+            switch (stepResult.Outcome)
             {
-                var pickupInStore = ParsePickupInStore(form);
-                if (pickupInStore)
-                {
-                    var pickupOption = await ParsePickupOptionAsync(cart, form);
-                    await SavePickupOptionAsync(pickupOption);
-
-                    return await OpcLoadStepAfterShippingMethod(cart);
-                }
-
-                //set value indicating that "pick up in store" option has not been chosen
-                await _genericAttributeService.SaveAttributeAsync<PickupPoint>(customer, NopCustomerDefaults.SelectedPickupPointAttribute, null, store.Id);
+                case ShippingMethodStepOutcome.OptionNotParsed:
+                    throw new Exception("Selected shipping method can't be parsed");
+                case ShippingMethodStepOutcome.OptionNotFound:
+                    throw new Exception("Selected shipping method can't be loaded");
             }
-
-            //parse selected method 
-            if (string.IsNullOrEmpty(shippingoption))
-                throw new Exception("Selected shipping method can't be parsed");
-            var splittedOption = shippingoption.Split(_separator, StringSplitOptions.RemoveEmptyEntries);
-            if (splittedOption.Length != 2)
-                throw new Exception("Selected shipping method can't be parsed");
-            var selectedName = splittedOption[0];
-            var shippingRateComputationMethodSystemName = splittedOption[1];
-
-            //find it
-            //performance optimization. try cache first
-            var shippingOptions = await _genericAttributeService.GetAttributeAsync<List<ShippingOption>>(customer,
-                NopCustomerDefaults.OfferedShippingOptionsAttribute, store.Id);
-            if (shippingOptions == null || !shippingOptions.Any())
-            {
-                //not found? let's load them using shipping service
-                shippingOptions = (await _shippingService.GetShippingOptionsAsync(cart, await _customerService.GetCustomerShippingAddressAsync(customer),
-                    customer, shippingRateComputationMethodSystemName, store.Id)).ShippingOptions.ToList();
-            }
-            else
-            {
-                //loaded cached results. let's filter result by a chosen shipping rate computation method
-                shippingOptions = shippingOptions.Where(so => so.ShippingRateComputationMethodSystemName.Equals(shippingRateComputationMethodSystemName, StringComparison.InvariantCultureIgnoreCase))
-                    .ToList();
-            }
-
-            var shippingOption = shippingOptions.Find(so => !string.IsNullOrEmpty(so.Name) && so.Name.Equals(selectedName, StringComparison.InvariantCultureIgnoreCase))
-                                 ?? throw new Exception("Selected shipping method can't be loaded");
-
-            //parse DesiredDeliveryDate
-            var desiredDeliveryDate = await ParseSelectedShippingMethodDeliveryDateAsync(shippingOption, shippingOptions, form);
-            if (desiredDeliveryDate != null)
-                await _genericAttributeService.SaveAttributeAsync(customer, NopCustomerDefaults.DesiredDeliveryDate, desiredDeliveryDate, store.Id);
-
-            //save
-            await _genericAttributeService.SaveAttributeAsync(customer, NopCustomerDefaults.SelectedShippingOptionAttribute, shippingOption, store.Id);
 
             //load next step
             return await OpcLoadStepAfterShippingMethod(cart);
@@ -2193,6 +2175,43 @@ public partial class CheckoutController : BasePublicController
         /// Gets a value indicating whether all checks passed
         /// </summary>
         public bool Passed => Outcome == CheckoutGuardOutcome.Passed;
+    }
+
+    /// <summary>
+    /// Represents the outcome of the shared shipping method step
+    /// </summary>
+    public enum ShippingMethodStepOutcome
+    {
+        /// <summary>
+        /// The pickup option was saved
+        /// </summary>
+        PickupSaved,
+
+        /// <summary>
+        /// The shipping option (and the desired delivery date, if any) was saved
+        /// </summary>
+        OptionSaved,
+
+        /// <summary>
+        /// The selected shipping option is empty or malformed
+        /// </summary>
+        OptionNotParsed,
+
+        /// <summary>
+        /// The selected shipping option was not found
+        /// </summary>
+        OptionNotFound
+    }
+
+    /// <summary>
+    /// Represents the result of the shared shipping method step
+    /// </summary>
+    public partial class ShippingMethodStepResult
+    {
+        /// <summary>
+        /// Gets or sets the step outcome
+        /// </summary>
+        public ShippingMethodStepOutcome Outcome { get; set; }
     }
 
     #endregion

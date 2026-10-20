@@ -552,29 +552,29 @@ None. There is no schema, setting, resource, route or view change. Third-party C
 
 #### Automated
 
-- [x] 4.1 Characterization suite passes unedited
-- [x] 4.2 Test files unchanged since Phase 2
-- [x] 4.3 No inlined guard copies remain
-- [x] 4.4 No existing CC member signature changed
-- [x] 4.5 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 4.1 Characterization suite passes unedited — f0bd5ddf0b
+- [x] 4.2 Test files unchanged since Phase 2 — f0bd5ddf0b
+- [x] 4.3 No inlined guard copies remain — f0bd5ddf0b
+- [x] 4.4 No existing CC member signature changed — f0bd5ddf0b
+- [x] 4.5 Full suite passes: `dotnet test --no-build --configuration Release src` — f0bd5ddf0b
 
 #### Manual
 
-- [x] 4.6 Storefront smoke test with OPC enabled (guest checkout + anonymous-disallowed error)
+- [x] 4.6 Storefront smoke test with OPC enabled (guest checkout + anonymous-disallowed error) — f0bd5ddf0b
 
 ### Phase 5: Shipping-method shared step core
 
 #### Automated
 
-- [ ] 5.1 Characterization suite passes unedited
-- [ ] 5.2 Test files unchanged since Phase 2
-- [ ] 5.3 Shared shipping logic exists once
-- [ ] 5.4 No existing CC member signature changed
-- [ ] 5.5 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 5.1 Characterization suite passes unedited
+- [x] 5.2 Test files unchanged since Phase 2
+- [x] 5.3 Shared shipping logic exists once
+- [x] 5.4 No existing CC member signature changed
+- [x] 5.5 Full suite passes: `dotnet test --no-build --configuration Release src`
 
 #### Manual
 
-- [ ] 5.6 Storefront: shipping method and pickup in both flows
+- [x] 5.6 Storefront: shipping method and pickup in both flows
 
 ### Phase 6: Payment-info shared step core
 
