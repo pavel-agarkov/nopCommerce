@@ -1,0 +1,11 @@
+# Research verification rule V1: every `virtual` method or property declaration.
+# Used by cc-virtual-signatures.sh to compare CheckoutController's virtual surface across commits.
+id: cc-virtual-members
+language: csharp
+rule:
+  any:
+    - kind: method_declaration
+    - kind: property_declaration
+  has:
+    kind: modifier
+    regex: ^virtual$

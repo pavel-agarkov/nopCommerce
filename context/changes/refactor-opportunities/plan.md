@@ -539,14 +539,14 @@ None. There is no schema, setting, resource, route or view change. Third-party C
 
 #### Automated
 
-- [ ] 3.1 Characterization suite passes unedited
-- [ ] 3.2 Test files unchanged since Phase 2
-- [ ] 3.3 No existing CC member signature changed
-- [ ] 3.4 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 3.1 Characterization suite passes unedited
+- [x] 3.2 Test files unchanged since Phase 2
+- [x] 3.3 No existing CC member signature changed
+- [x] 3.4 Full suite passes: `dotnet test --no-build --configuration Release src`
 
 #### Manual
 
-- [ ] 3.5 Storefront smoke test with OPC disabled (multi-step walk + login challenge)
+- [x] 3.5 Storefront smoke test with OPC disabled (multi-step walk + login challenge)
 
 ### Phase 4: Guard adoption in OPC actions
 
