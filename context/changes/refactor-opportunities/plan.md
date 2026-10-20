@@ -580,12 +580,12 @@ None. There is no schema, setting, resource, route or view change. Third-party C
 
 #### Automated
 
-- [x] 6.1 Characterization suite passes unedited
-- [x] 6.2 Test files unchanged since Phase 2
-- [x] 6.3 Shared payment-info logic exists once
-- [x] 6.4 No existing CC member signature changed
-- [x] 6.5 Full suite passes: `dotnet test --no-build --configuration Release src`
+- [x] 6.1 Characterization suite passes unedited — e0fc1b5075
+- [x] 6.2 Test files unchanged since Phase 2 — e0fc1b5075
+- [x] 6.3 Shared payment-info logic exists once — e0fc1b5075
+- [x] 6.4 No existing CC member signature changed — e0fc1b5075
+- [x] 6.5 Full suite passes: `dotnet test --no-build --configuration Release src` — e0fc1b5075
 
 #### Manual
 
-- [x] 6.6 Storefront: payment info with Check/Money Order in both flows
+- [x] 6.6 Storefront: payment info with Check/Money Order in both flows — e0fc1b5075
